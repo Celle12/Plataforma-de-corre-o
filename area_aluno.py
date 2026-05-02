@@ -2,8 +2,9 @@ import streamlit as st
 import pyrebase
 import time
 import json
+import plotly.graph_objects as go
 from io import BytesIO
-from PIL import Image, ImageDraw
+from PIL import Image
 from google.cloud import firestore, storage
 from google.oauth2 import service_account
 from urllib.parse import unquote
@@ -11,7 +12,7 @@ from urllib.parse import unquote
 # 1. Configuração da Página
 st.set_page_config(page_title="Área do Aluno - Redação", page_icon="📝", layout="wide")
 
-# 2. Configuração do Firebase (databaseURL ADICIONADA)
+# 2. Configuração do Firebase
 firebaseConfig = {
   "apiKey": "AIzaSyBBxjGQkN_b-keKwXw9KQq-W8l76D6C2zA",
   "authDomain": "plataforma-redacao-de0f3.firebaseapp.com",
@@ -19,7 +20,7 @@ firebaseConfig = {
   "storageBucket": "plataforma-redacao-de0f3.firebasestorage.app",
   "messagingSenderId": "105466681652",
   "appId": "1:105466681652:web:13438e4cbd600a1c3a2d61",
-  "databaseURL": "" # Esta linha resolve o KeyError do print
+  "databaseURL": "" 
 }
 
 @st.cache_resource
@@ -43,13 +44,12 @@ if 'email_usuario' not in st.session_state:
 if 'nome_usuario' not in st.session_state:
     st.session_state.nome_usuario = ""
 
-# --- LÓGICA DE ACESSO (SEM st.form PARA EVITAR CLIQUE DUPLO) ---
+# --- LÓGICA DE ACESSO ---
 if not st.session_state.logado:
     st.title("🔐 Acesso à Plataforma")
     aba1, aba2 = st.tabs(["Login", "Cadastrar"])
     
     with aba1:
-        # Campos fora de formulário respondem melhor ao primeiro clique
         email_input = st.text_input("E-mail", key="login_email_final")
         senha_input = st.text_input("Senha", type="password", key="login_senha_final")
         
@@ -57,16 +57,12 @@ if not st.session_state.logado:
             if email_input and senha_input:
                 try:
                     user = auth.sign_in_with_email_and_password(email_input, senha_input)
-                    
-                    # Busca dados do usuário
                     doc = db.collection("usuarios").document(email_input).get()
                     st.session_state.nome_usuario = doc.to_dict().get("nome") if doc.exists else email_input
                     st.session_state.email_usuario = email_input
                     st.session_state.logado = True
-                    
-                    # Força a atualização para entrar no painel
                     st.rerun()
-                except Exception as e:
+                except Exception:
                     st.error("E-mail ou senha incorretos.")
             else:
                 st.warning("Preencha todos os campos.")
@@ -80,15 +76,10 @@ if not st.session_state.logado:
                 if nome_completo and email_novo and senha_nova:
                     try:
                         auth.create_user_with_email_and_password(email_novo, senha_nova)
-                        db.collection("usuarios").document(email_novo).set({
-                            "nome": nome_completo, 
-                            "email": email_novo
-                        })
+                        db.collection("usuarios").document(email_novo).set({"nome": nome_completo, "email": email_novo})
                         st.success("Conta criada! Agora faça login na aba ao lado.")
                     except:
                         st.error("Erro ao criar conta.")
-
-# --- O RESTANTE DO CÓDIGO (ÁREA LOGADA) CONTINUA IGUAL ---
 
 # --- ÁREA LOGADA ---
 else:
@@ -102,6 +93,7 @@ else:
 
     tab_envio, tab_status = st.tabs(["🚀 Enviar Nova Redação", "📂 Acompanhar Minhas Redações"])
 
+    # --- TAB DE ENVIO ---
     with tab_envio:
         st.title("📝 Envio de Redação")
         tema = st.selectbox("Selecione o tema:", ["Escolha...", "Impactos da IA", "Saúde Mental", "Escolaridades"])
@@ -138,32 +130,32 @@ else:
                         })
                         st.success("Enviado com sucesso!")
                         st.balloons()
+                    else:
+                        st.warning("Adicione conteúdo antes de enviar.")
 
+    # --- TAB DE STATUS E VISUALIZAÇÃO INTERATIVA ---
     with tab_status:
         st.title("📂 Histórico de Correções")
         
-        # CORREÇÃO DO ERRO DO PRINT: Removido o order_by do Firestore para evitar o erro de Precondition
         redacoes_query = db.collection("redacoes").where("aluno_email", "==", st.session_state.email_usuario).stream()
         minhas_redacoes = [{**r.to_dict(), 'id': r.id} for r in redacoes_query]
 
         if not minhas_redacoes:
             st.info("Você ainda não tem redações enviadas.")
         else:
-            # Organizamos por data aqui no Python mesmo
             minhas_redacoes.sort(key=lambda x: x.get('data_envio') or 0, reverse=True)
-            
             escolha = st.selectbox("Selecione a redação:", [f"{r['tema']} - {r['status']}" for r in minhas_redacoes])
             r = next(red for red in minhas_redacoes if f"{red['tema']} - {red['status']}" == escolha)
 
             st.divider()
 
             if r['status'] == "Pendente":
-                st.warning("⏳ Sua redação está na fila de correção.")
+                st.warning("⏳ Sua redação está na fila de correção. Aguarde o professor.")
 
             elif r['status'] == "Negada":
                 st.error(f"❌ Problema: {r.get('motivo_negativa')}")
                 st.info(f"**Obs:** {r.get('obs_negativa')}")
-                novo_arq = st.file_uploader("Reenviar foto:", type=["jpg", "png", "jpeg"], key="reenvio")
+                novo_arq = st.file_uploader("Reenviar foto nítida:", type=["jpg", "png", "jpeg"], key="reenvio")
                 if st.button("Confirmar Reenvio"):
                     if novo_arq:
                         nome_blob = f"redacoes/{st.session_state.email_usuario}_RE_{int(time.time())}.jpg"
@@ -185,23 +177,89 @@ else:
                 c1.metric("C1", notas[0]); c2.metric("C2", notas[1]); c3.metric("C3", notas[2])
                 c4.metric("C4", notas[3]); c5.metric("C5", notas[4])
 
-                t_img, t_com = st.tabs(["🖼️ Ver Folha", "💬 Comentários"])
+                t_img, t_com = st.tabs(["🖼️ Ver Folha Interativa", "💬 Resumo dos Comentários"])
+                
                 with t_img:
-                    if r.get('caminho_storage'):
+                    # Lógica robusta de busca da imagem (Igual a do professor)
+                    caminho = r.get('caminho_storage')
+                    url_full = r.get('url_arquivo', '')
+                    if not caminho and url_full:
+                        bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
+                        if bucket_name in url_full:
+                            caminho = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
+
+                    if caminho:
                         try:
-                            blob = bucket.blob(r['caminho_storage'])
-                            img = Image.open(BytesIO(blob.download_as_bytes())).convert("RGB")
-                            # Desenhar marcas (escala 1000px)
-                            L = 1000
-                            img = img.resize((L, int(L * (img.size[1]/img.size[0]))))
-                            draw = ImageDraw.Draw(img)
-                            for i, anot in enumerate(r.get('anotacoes_detalhadas', [])):
-                                x, y = anot['x'], anot['y']
-                                draw.ellipse([x-18, y-18, x+18, y+18], fill="red", outline="white", width=4)
-                                draw.text((x-5, y-8), str(i+1), fill="white")
-                            st.image(img, use_container_width=True)
-                        except: st.error("Erro ao carregar imagem.")
+                            # 1. Baixar a imagem original
+                            blob = bucket.blob(caminho)
+                            img_bytes = blob.download_as_bytes()
+                            img = Image.open(BytesIO(img_bytes)).convert("RGB")
+                            
+                            # 2. Calibrar para 1000px (A MESMA MIRA DO PROFESSOR)
+                            LARGURA = 1000
+                            w_orig, h_orig = img.size
+                            ALTURA = int(LARGURA * (h_orig / w_orig))
+                            img = img.resize((LARGURA, ALTURA))
+
+                            # 3. Criar gráfico interativo com Plotly
+                            fig = go.Figure()
+                            
+                            # Adicionar a imagem como fundo (papel de parede)
+                            fig.add_layout_image(
+                                dict(
+                                    source=img, xref="x", yref="y",
+                                    x=0, y=0, sizex=LARGURA, sizey=ALTURA,
+                                    sizing="stretch", opacity=1, layer="below"
+                                )
+                            )
+
+                            # Ajustar os eixos (Y invertido para bater com a imagem)
+                            fig.update_xaxes(visible=False, range=[0, LARGURA])
+                            fig.update_yaxes(visible=False, range=[ALTURA, 0], scaleanchor="x", scaleratio=1)
+
+                            # 4. Adicionar os pontos com hover (etiquetas flutuantes)
+                            anotacoes = r.get('anotacoes_detalhadas', [])
+                            if anotacoes:
+                                xs = [a['x'] for a in anotacoes]
+                                ys = [a['y'] for a in anotacoes]
+                                numeros = [str(i+1) for i in range(len(anotacoes))]
+                                
+                                # O texto que vai aparecer no "balãozinho" quando passar o mouse
+                                textos_hover = [f"<b>Erro {i+1}</b><br>{a['texto']}" for i, a in enumerate(anotacoes)]
+
+                                fig.add_trace(go.Scatter(
+                                    x=xs, y=ys,
+                                    mode='markers+text',
+                                    text=numeros,
+                                    textposition="middle center",
+                                    textfont=dict(color='white', size=14, family="Arial Black"),
+                                    marker=dict(size=26, color='rgba(255, 0, 0, 0.9)', line=dict(color='white', width=3)),
+                                    hovertext=textos_hover,
+                                    hoverinfo="text", # Mostra só o texto programado
+                                    showlegend=False
+                                ))
+
+                            # Remover margens para focar 100% na redação
+                            fig.update_layout(
+                                margin=dict(l=0, r=0, t=0, b=0),
+                                height=ALTURA,
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                hovermode="closest"
+                            )
+
+                            # Renderizar o gráfico no Streamlit
+                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+                        except Exception as e:
+                            st.error(f"Erro ao carregar a imagem interativa: {e}")
+                    else:
+                        st.info("Nenhuma imagem atrelada a esta redação. Foi enviada como texto?")
+                        st.text_area("Texto enviado:", r.get('texto'), height=300, disabled=True)
+
                 with t_com:
-                    st.info(f"**Feedback Geral:** {r.get('feedback_geral')}")
+                    st.info(f"**Feedback Geral:** {r.get('feedback_geral', 'Sem feedback geral.')}")
+                    st.divider()
+                    st.write("### 📍 Detalhamento dos Erros")
                     for i, anot in enumerate(r.get('anotacoes_detalhadas', [])):
-                        st.write(f"📍 **Ponto {i+1}:** {anot['texto']}")
+                        st.write(f"**Erro {i+1}:** {anot['texto']}")
