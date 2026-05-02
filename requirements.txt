@@ -3,6 +3,6 @@ Pillow
 google-cloud-firestore
 google-cloud-storage
 google-auth
-streamlit-drawable-canvas==0.11.0
+streamlit-drawable-canvas
 pyrebase4
 requests
