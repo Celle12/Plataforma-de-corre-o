@@ -8,11 +8,12 @@ from google.cloud import firestore, storage
 from google.oauth2 import service_account
 from urllib.parse import unquote
 
-# --- 1. A VACINA DEFINITIVA (Compatibilidade) ---
-# Isso resolve o erro 'image_to_url' sem precisar de CSS complexo
+# --- 1. A VACINA DEFINITIVA (Versão Flexível) ---
 import streamlit.elements.image as st_image
 
-def vacina_image_to_url(image, width, height, clamp, channels, output_format, image_id):
+# O uso de *args e **kwargs garante que a função não quebre, independentemente 
+# da quantidade de parâmetros que o Canvas tente empurrar para ela.
+def vacina_image_to_url(image, *args, **kwargs):
     if isinstance(image, str):
         return image
     buffered = BytesIO()
@@ -24,8 +25,10 @@ def vacina_image_to_url(image, width, height, clamp, channels, output_format, im
 
 st_image.image_to_url = vacina_image_to_url
 
-# Agora importamos o canvas após a vacina estar aplicada
+# Agora importamos o canvas
 from streamlit_drawable_canvas import st_canvas
+
+# ... (O resto do seu código continua exatamente igual daqui para baixo) ...
 
 # --- 2. CONFIGURAÇÕES ---
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
