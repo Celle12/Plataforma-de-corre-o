@@ -109,7 +109,7 @@ elif st.session_state.logado == True:
         st.rerun()
 
     st.title("📝 Envio de Redação")
-    tema = st.selectbox("Selecione o tema:", ["Escolha...", "Impactos da IA", "Saúde Mental"])
+    tema = st.selectbox("Selecione o tema:", ["Escolha...", "Impactos da IA", "Saúde Mental", "Escolaridades"])
     
     if tema != "Escolha...":
         st.subheader("Como você quer enviar sua redação?")
