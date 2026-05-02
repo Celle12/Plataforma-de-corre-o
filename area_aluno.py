@@ -93,19 +93,27 @@ else:
 
     tab_envio, tab_status = st.tabs(["🚀 Enviar Nova Redação", "📂 Acompanhar Minhas Redações"])
 
-    # --- TAB DE ENVIO (CORRIGIDA) ---
+    # --- TAB DE ENVIO ---
     with tab_envio:
         st.title("📝 Envio de Redação")
         
-        # Busca temas dinâmicos do banco de dados
+        # MUDANÇA: Buscando todo o dicionário dos temas, não só o nome
         temas_ref = db.collection("temas").stream()
-        lista_temas = [t.to_dict()['nome'] for t in temas_ref]
+        temas_dict = {t.to_dict()['nome']: t.to_dict() for t in temas_ref}
+        lista_temas = list(temas_dict.keys())
         
-        # Seletor agora dentro da Tab
         tema = st.selectbox("Selecione o tema:", ["Escolha..."] + lista_temas)
         
         if tema != "Escolha...":
             st.subheader(f"Tema: {tema}")
+            
+            # NOVO: Verifica se o tema escolhido tem um PDF atrelado e exibe o link
+            dados_do_tema = temas_dict[tema]
+            if dados_do_tema.get('url_apoio'):
+                st.info("📚 Este tema possui um texto motivador / de apoio.")
+                st.markdown(f"[**⬇️ Clique aqui para Ler / Baixar o Texto de Apoio (PDF)**]({dados_do_tema['url_apoio']})")
+                st.write("---")
+
             metodo = st.radio("Formato:", ["Digitar Texto", "Anexar Arquivo"], horizontal=True)
             
             with st.form("envio_redacao", clear_on_submit=True):
