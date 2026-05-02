@@ -4,21 +4,29 @@ import time
 import requests
 from io import BytesIO
 from PIL import Image
-from google.cloud import firestore
+from google.cloud import firestore, storage  # Adicionado storage
 from google.oauth2 import service_account
 from streamlit_drawable_canvas import st_canvas
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
-# 2. Conexão com Firestore (Usando a mesma chave secreta)
+# 2. Conexão com Firestore e Storage (Uso de credenciais diretas)
 @st.cache_resource
-def iniciar_firestore():
+def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
     credenciais = service_account.Credentials.from_service_account_info(info_chave)
-    return firestore.Client(credentials=credenciais, project=info_chave['project_id'])
+    
+    # Cliente do Banco de Dados
+    db = firestore.Client(credentials=credenciais, project=info_chave['project_id'])
+    
+    # Cliente do Storage (Cofre de arquivos)
+    storage_client = storage.Client(credentials=credenciais, project=info_chave['project_id'])
+    bucket = storage_client.bucket("plataforma-redacao-de0f3.firebasestorage.app")
+    
+    return db, bucket
 
-db = iniciar_firestore()
+db, bucket = iniciar_servicos()
 
 # 3. Estilização das Competências e Cores
 COMPETENCIAS = {
@@ -45,46 +53,59 @@ for r in redacoes_ref:
 if not lista_redacoes:
     st.info("Nenhuma redação pendente por enquanto! ☕")
 else:
-    # Agora usamos o nome em vez do e-mail no menu
     opcoes = {f"{r.get('aluno_nome', 'Sem Nome')} - {r['tema']}": r for r in lista_redacoes}
     escolha = st.selectbox("Selecione uma redação para corrigir:", list(opcoes.keys()))
     redacao = opcoes[escolha]
 
     col1, col2 = st.columns([2, 1])
+    canvas_result = None # Inicializa para evitar erros de referência
 
     with col1:
         st.write("### 📝 Folha de Redação")
         
-        # Se for imagem, ativa o Canvas de anotação
         if redacao.get('tipo') == 'arquivo':
-            comp_selecionada = st.radio("Selecione a competência para marcar na imagem:", list(COMPETENCIAS.keys()), horizontal=True)
-            cor_pincel = COMPETENCIAS[comp_selecionada]
-
-            # Carrega imagem
-            response = requests.get(redacao['url_arquivo'])
-            img = Image.open(BytesIO(response.content))
+            url_full = redacao['url_arquivo']
             
-            # Ferramenta de Desenho (Canvas)
-            st.info("💡 Desenhe retângulos sobre os erros na imagem.")
-            canvas_result = st_canvas(
-                fill_color=cor_pincel,
-                stroke_width=1,
-                stroke_color="#000",
-                background_image=img,
-                update_streamlit=True,
-                height=img.height * (800 / img.width),
-                width=800,
-                drawing_mode="rect",
-                key="canvas_corretor",
-            )
+            try:
+                # Extrai o caminho real do arquivo dentro do Storage
+                # Exemplo: de uma URL longa, pega apenas 'redacoes/arquivo.jpg'
+                nome_arquivo_storage = url_full.split("/o/")[1].split("?")[0].replace("%2F", "/").replace("%40", "@")
+                blob = bucket.blob(nome_arquivo_storage)
+                conteudo_arquivo = blob.download_as_bytes()
+                
+                # VERIFICAÇÃO DE PDF
+                if ".pdf" in url_full.lower():
+                    st.warning("⚠️ Esta redação é um PDF. O sistema de 'caixinhas' funciona apenas em fotos (JPG/PNG).")
+                    st.download_button("📥 Baixar PDF para Corrigir Offline", conteudo_arquivo, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
+                else:
+                    # Carrega como imagem se não for PDF
+                    img = Image.open(BytesIO(conteudo_arquivo))
+                    
+                    comp_selecionada = st.radio("Selecione a competência para marcar na imagem:", list(COMPETENCIAS.keys()), horizontal=True)
+                    cor_pincel = COMPETENCIAS[comp_selecionada]
+
+                    st.info("💡 Desenhe retângulos sobre os erros na imagem.")
+                    canvas_result = st_canvas(
+                        fill_color=cor_pincel,
+                        stroke_width=1,
+                        stroke_color="#000",
+                        background_image=img,
+                        update_streamlit=True,
+                        height=img.height * (800 / img.width),
+                        width=800,
+                        drawing_mode="rect",
+                        key="canvas_corretor",
+                    )
+            except Exception as e:
+                st.error(f"Erro ao carregar o arquivo do Storage: {e}")
         else:
+            # Caso seja texto digitado
             st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
 
     with col2:
         st.write("### 📊 Notas e Comentários")
         
         with st.form("form_correcao"):
-            # 1. Notas das Competências
             n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
             n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
             n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
@@ -93,16 +114,14 @@ else:
             
             st.divider()
             
-            # 2. Comentários por Caixinha (A Mágica acontece aqui)
             comentarios_caixinhas = []
-            if redacao.get('tipo') == 'arquivo' and canvas_result.json_data:
+            # Só processa caixinhas se o canvas existir (não for PDF/Texto)
+            if canvas_result and canvas_result.json_data:
                 objetos = canvas_result.json_data["objects"]
                 if objetos:
                     st.write("#### 💬 Comentários nos destaques:")
                     for i, obj in enumerate(objetos):
-                        # Identifica a cor para saber qual competência é
                         cor_hex = obj['fill']
-                        # Input de texto para cada caixinha desenhada
                         comentario = st.text_input(f"Comentário para o Destaque {i+1}", key=f"coment_{i}")
                         comentarios_caixinhas.append({
                             "id_caixa": i,
@@ -127,7 +146,7 @@ else:
                     "notas": [n1, n2, n3, n4, n5],
                     "nota_final": nota_total,
                     "feedback_geral": feedback_geral,
-                    "anotacoes_detalhadas": comentarios_caixinhas, # Salva a lista completa
+                    "anotacoes_detalhadas": comentarios_caixinhas,
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
                 st.success("✅ Correção enviada com sucesso!")
