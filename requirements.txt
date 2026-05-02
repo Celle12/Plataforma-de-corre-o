@@ -4,3 +4,4 @@ google-cloud-firestore
 google-cloud-storage
 streamlit-image-coordinates
 pyrebase4
+plotly
