@@ -1,5 +1,6 @@
 import streamlit as st
 import pyrebase
+import time
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Área do Aluno - Redação", page_icon="📝", layout="centered")
@@ -15,7 +16,7 @@ firebaseConfig = {
   "databaseURL": "" 
 }
 
-# Inicialização segura do Firebase
+# Inicialização segura
 @st.cache_resource
 def iniciar_firebase():
     return pyrebase.initialize_app(firebaseConfig)
@@ -30,76 +31,69 @@ if 'email_usuario' not in st.session_state:
     st.session_state.email_usuario = ""
 
 # ==========================================
-# LÓGICA DE TRANSIÇÃO DE TELAS
+# ESTRUTURA PRINCIPAL DO APP
 # ==========================================
 
-if not st.session_state.logado:
+# Se NÃO estiver logado, mostra APENAS a tela de login
+if st.session_state.logado == False:
     st.title("🔐 Acesso à Plataforma")
     aba1, aba2 = st.tabs(["Login", "Cadastrar"])
 
     with aba1:
-        # Criando um formulário para o Login
-        with st.form("form_login"):
-            email_login = st.text_input("E-mail")
-            senha_login = st.text_input("Senha", type="password")
-            botao_entrar = st.form_submit_button("Entrar", type="primary")
-            
-            if botao_entrar:
+        with st.form("login_form"):
+            email_input = st.text_input("E-mail")
+            senha_input = st.text_input("Senha", type="password")
+            btn_login = st.form_submit_button("Entrar", type="primary")
+
+            if btn_login:
                 try:
-                    usuario = auth.sign_in_with_email_and_password(email_login, senha_login)
+                    # Tenta o login
+                    user = auth.sign_in_with_email_and_password(email_input, senha_input)
+                    # Se deu certo, salva no estado e força o reinício
                     st.session_state.logado = True
-                    st.session_state.email_usuario = email_login
-                    st.rerun() 
+                    st.session_state.email_usuario = email_input
+                    st.success("Login realizado! Entrando...")
+                    time.sleep(0.5) # Pequena pausa para o usuário ver o sucesso
+                    st.rerun()
                 except:
-                    st.error("E-mail ou senha incorretos. Verifique seus dados.")
+                    st.error("E-mail ou senha incorretos. Tente novamente.")
 
     with aba2:
-        # Criando um formulário para o Cadastro
-        with st.form("form_cadastro"):
-            email_cadastro = st.text_input("Novo E-mail")
-            senha_cadastro = st.text_input("Nova Senha", type="password", help="Mínimo 6 caracteres")
-            botao_cadastrar = st.form_submit_button("Criar Minha Conta")
-            
-            if botao_cadastrar:
-                try:
-                    auth.create_user_with_email_and_password(email_cadastro, senha_cadastro)
-                    st.success("Conta criada com sucesso! Agora você pode fazer login.")
-                except Exception as e:
-                    st.error("Erro ao cadastrar. Verifique o e-mail ou se a senha tem 6+ caracteres.")
+        with st.form("signup_form"):
+            email_novo = st.text_input("Novo E-mail")
+            senha_nova = st.text_input("Nova Senha", type="password")
+            btn_criar = st.form_submit_button("Criar Conta")
 
-else:
-    # --- TELA DO ALUNO ---
-    st.sidebar.title("Meu Painel")
-    st.sidebar.write(f"👤 **Usuário:**\n{st.session_state.email_usuario}")
-    st.sidebar.divider()
+            if btn_criar:
+                try:
+                    auth.create_user_with_email_and_password(email_novo, senha_nova)
+                    st.success("Conta criada! Agora faça o login na aba ao lado.")
+                except:
+                    st.error("Erro ao criar conta. Verifique os dados.")
+
+# Se ESTIVER logado, mostra APENAS a área do aluno
+elif st.session_state.logado == True:
+    # --- Sidebar ---
+    st.sidebar.title("Painel do Aluno")
+    st.sidebar.info(f"Logado como:\n{st.session_state.email_usuario}")
     
     if st.sidebar.button("Sair da Conta"):
         st.session_state.logado = False
         st.session_state.email_usuario = ""
         st.rerun()
 
+    # --- Conteúdo Principal ---
     st.title("📝 Envio de Redação")
-    st.write("Selecione o tema desejado e envie seu texto para a nossa equipe.")
-
-    st.subheader("1. Tema da Redação")
-    temas_disponiveis = [
-        "Selecione um tema...", 
-        "Os impactos da IA na educação", 
-        "Desigualdade social no Brasil",
-        "Saúde mental na adolescência"
-    ]
-    tema_escolhido = st.selectbox("Sobre o que você vai escrever hoje?", temas_disponiveis)
-
-    if tema_escolhido != "Selecione um tema...":
-        st.subheader("2. Envie seu Texto")
-        # Também podemos usar form aqui para garantir o envio correto do texto longo
-        with st.form("form_redacao"):
-            texto_redacao = st.text_area("Digite ou cole sua redação aqui:", height=350)
-            botao_enviar = st.form_submit_button("Enviar para Correção", type="primary")
+    
+    tema = st.selectbox("Selecione o tema:", ["Escolha...", "Impactos da IA", "Saúde Mental"])
+    
+    if tema != "Escolha...":
+        with st.form("envio_redacao"):
+            texto = st.text_area("Sua redação:", height=300)
+            enviar = st.form_submit_button("Enviar para Correção")
             
-            if botao_enviar:
-                if len(texto_redacao) > 100:
-                    st.success("🚀 Redação enviada com sucesso!")
-                    st.balloons()
+            if enviar:
+                if len(texto) > 100:
+                    st.success("Enviado com sucesso!")
                 else:
-                    st.warning("Seu texto está muito curto para uma redação.")
+                    st.warning("O texto está muito curto.")
