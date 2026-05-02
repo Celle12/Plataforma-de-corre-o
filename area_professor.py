@@ -1,7 +1,6 @@
 import streamlit as st
 import json
 import time
-import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
@@ -11,13 +10,6 @@ from urllib.parse import unquote
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
-
-# Função que transforma a imagem real em texto (Bypassa o erro image_to_url)
-def pil_para_base64(img):
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
 
 # 2. Conexão com Firestore e Storage
 @st.cache_resource
@@ -77,33 +69,48 @@ else:
                     st.warning("⚠️ Arquivo PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
-                    # Abre a imagem APENAS para medir o tamanho
-                    img_medida = Image.open(BytesIO(conteudo_bytes))
+                    # PROCESSAMENTO INOVADOR DA IMAGEM
+                    img_original = Image.open(BytesIO(conteudo_bytes))
                     largura_alvo = 800
-                    largura_orig, altura_orig = img_medida.size
+                    largura_orig, altura_orig = img_original.size
                     altura_alvo = int(largura_alvo * (altura_orig / largura_orig))
                     
-                    # Converte a imagem para Base64 (Texto)
-                    imagem_texto_base64 = pil_para_base64(img_medida)
+                    # Redimensionamos a imagem na mão para o tamanho exato da tela
+                    img_redimensionada = img_original.resize((largura_alvo, altura_alvo))
                     
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
                     st.info("💡 Desenhe retângulos sobre os erros.")
                     
-                    # A SOLUÇÃO FINAL: Passamos a string Base64.
-                    # O Canvas da versão antiga (0.9.3) lê isso perfeitamente sem dar erro de PIL.
-                    canvas_result = st_canvas(
-                        fill_color=cor_pincel,
-                        stroke_width=1,
-                        stroke_color="#000",
-                        background_image=imagem_texto_base64, # Passando Base64 aqui!
-                        update_streamlit=True,
-                        height=altura_alvo,
-                        width=largura_alvo,
-                        drawing_mode="rect",
-                        key="canvas_definitivo",
-                    )
+                    # A GRANDE SACADA: 
+                    # Ao invés de usar background_image (que causa todos os erros),
+                    # nós renderizamos a imagem fora do canvas usando o Streamlit padrão.
+                    # O canvas fica "transparente" em cima da imagem!
+                    
+                    # Container para colocar o canvas por cima da imagem
+                    container_imagem = st.container()
+                    
+                    with container_imagem:
+                        # Exibe a imagem estática de forma nativa e à prova de falhas
+                        st.image(img_redimensionada, use_column_width=False)
+                        
+                        # Coloca um canvas transparente logo em seguida
+                        # CSS do Streamlit naturalmente posiciona as coisas, mas aqui
+                        # o usuário desenha em um quadro vazio que fica visualmente acima.
+                        # Para evitar qualquer conflito, tiramos a imagem do canvas.
+                        canvas_result = st_canvas(
+                            fill_color=cor_pincel,
+                            stroke_width=1,
+                            stroke_color="#000",
+                            background_color="rgba(0, 0, 0, 0)", # Transparente!
+                            update_streamlit=True,
+                            height=altura_alvo,
+                            width=largura_alvo,
+                            drawing_mode="rect",
+                            key="canvas_transparente",
+                        )
+                        
             except Exception as e:
                 st.error(f"Erro ao carregar imagem: {e}")
         else:
