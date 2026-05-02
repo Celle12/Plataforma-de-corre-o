@@ -23,7 +23,7 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 3. Estilização das Competências
+# 3. Estilização
 COMPETENCIAS = {
     "C1 - Gramática": "#0000FF33", "C2 - Repertório": "#00FF0033",
     "C3 - Argumentação": "#FFFF0033", "C4 - Coesão": "#FFA50033", "C5 - Proposta": "#FF000033"
@@ -77,28 +77,42 @@ else:
 
                     st.info("💡 Desenhe sobre os erros.")
 
-                    # --- CSS CIRÚRGICO (Evita tela branca e trava de scroll) ---
+                    # --- NOVO AJUSTE DE CAMADAS (CSS SEGURO) ---
+                    # Criamos um container relativo para que o absoluto funcione dentro dele
                     st.markdown(f"""
                         <style>
-                        /* Bloqueia o drag da imagem para evitar o 'fantasma' */
-                        div[data-testid="stImage"] img {{
+                        /* Estiliza o container da imagem */
+                        .redacao-container {{
+                            position: relative;
+                            width: {largura_alvo}px;
+                            height: {altura_alvo}px;
+                        }}
+                        /* Trava a imagem no fundo */
+                        .redacao-container img {{
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            z-index: 1;
                             user-select: none;
                             -webkit-user-drag: none;
-                            pointer-events: none;
                         }}
-                        /* Puxa APENAS o Iframe do canvas para cima da imagem */
-                        iframe[title="streamlit_drawable_canvas.st_canvas"] {{
-                            margin-top: -{altura_alvo + 45}px;
-                            position: relative;
-                            z-index: 10;
+                        /* Coloca o canvas por cima sem margens negativas loucas */
+                        .redacao-container .stCanvas {{
+                            position: absolute !important;
+                            top: 0;
+                            left: 0;
+                            z-index: 5;
                         }}
                         </style>
                     """, unsafe_allow_html=True)
 
-                    # 1. Mostramos a imagem
+                    # Abrimos o container manual
+                    st.markdown('<div class="redacao-container">', unsafe_allow_html=True)
+                    
+                    # 1. Imagem Base
                     st.image(img_original, width=largura_alvo)
                     
-                    # 2. O Canvas aparece logo abaixo, mas o CSS acima o "puxa" para cima da foto
+                    # 2. Canvas Sobreposto
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
@@ -108,8 +122,12 @@ else:
                         height=altura_alvo,
                         width=largura_alvo,
                         drawing_mode="rect",
-                        key="canvas_corretor_v4",
+                        key="canvas_camada_final",
                     )
+                    
+                    # Fechamos o container manual
+                    st.markdown('</div>', unsafe_allow_html=True)
+
             except Exception as e:
                 st.error(f"Erro ao carregar: {e}")
         else:
@@ -123,8 +141,6 @@ else:
             n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
             n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
             n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
-            
-            st.divider()
             
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
