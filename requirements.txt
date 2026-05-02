@@ -1,5 +1,8 @@
 streamlit
-Pyrebase4
+Pillow
 google-cloud-firestore
 google-cloud-storage
-streamlit-drawable-canvas>=0.11.0
+google-auth
+streamlit-drawable-canvas==0.11.0
+pyrebase4
+requests
