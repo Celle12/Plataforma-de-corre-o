@@ -11,6 +11,21 @@ from urllib.parse import unquote
 # 1. Configuração e Conexão
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
+# --- CSS PARA EVITAR ATROPELAMENTO ---
+st.markdown("""
+    <style>
+    /* Garante que as colunas tenham um espaçamento real */
+    [data-testid="column"] {
+        padding-right: 25px !important;
+    }
+    /* Impede que o conteúdo da imagem transborde e cubra a lateral */
+    .img-container {
+        overflow-x: auto;
+        border-right: 1px solid #eee;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 @st.cache_resource
 def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
@@ -38,12 +53,12 @@ else:
     escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" for r in lista])
     redacao = next(r for r in lista if f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" == escolha)
 
-    # --- AJUSTE DE LAYOUT: Coluna da direita mais estreita ---
-    col1, col2 = st.columns([3.5, 1])
+    # --- AJUSTE DE LAYOUT: Prioridade total para a imagem (4 para 1) ---
+    col1, col2 = st.columns([4, 1])
 
     with col1:
+        st.markdown('<div class="img-container">', unsafe_allow_html=True)
         st.write("### 📝 Folha de Redação")
-        st.info("💡 Clique na imagem para marcar um erro.")
         
         caminho = redacao.get('caminho_storage')
         url_full = redacao.get('url_arquivo', '')
@@ -59,7 +74,6 @@ else:
                 img_bytes = blob.download_as_bytes()
                 img_original = Image.open(BytesIO(img_bytes)).convert("RGB")
                 
-                # Largura de 1000px mantida conforme sua aprovação
                 LARGURA_CALIBRADA = 1000 
                 w_orig, h_orig = img_original.size
                 altura_calibrada = int(LARGURA_CALIBRADA * (h_orig / w_orig))
@@ -67,15 +81,13 @@ else:
                 img_para_exibir = img_original.resize((LARGURA_CALIBRADA, altura_calibrada))
                 draw = ImageDraw.Draw(img_para_exibir)
                 
-                # Desenhar marcas robustas
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
                     x, y = ponto["x"], ponto["y"]
                     raio = 18
                     draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
                     draw.text((x-5, y-8), str(i+1), fill="white")
 
-                # Captura coordenadas em escala 1:1
-                value = streamlit_image_coordinates(img_para_exibir, key="editor_precisao_v3")
+                value = streamlit_image_coordinates(img_para_exibir, key="editor_precisao_v4")
 
                 if value:
                     novo_ponto = {"x": value["x"], "y": value["y"]}
@@ -84,9 +96,10 @@ else:
                         st.rerun()
 
             except Exception as e:
-                st.error(f"Erro de calibração: {e}")
+                st.error(f"Erro de visualização: {e}")
         else:
-            st.error("Arquivo não encontrado no Storage.")
+            st.error("Arquivo não encontrado.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
         st.write("### 📊 Notas")
@@ -95,7 +108,7 @@ else:
             st.rerun()
 
         with st.form("form_final"):
-            st.write("#### Competências (0-200)")
+            st.write("#### Competências")
             n1 = st.number_input("C1", 0, 200, 160, 40)
             n2 = st.number_input("C2", 0, 200, 160, 40)
             n3 = st.number_input("C3", 0, 200, 160, 40)
@@ -124,5 +137,5 @@ else:
                 })
                 st.session_state.pontos_correcao = []
                 st.success("✅ Enviado!")
-                time.sleep(1.5)
+                time.sleep(1)
                 st.rerun()
