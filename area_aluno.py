@@ -144,6 +144,7 @@ elif st.session_state.logado == True:
                         "tema": tema,
                         "texto": texto_redacao,
                         "url_arquivo": url_arquivo,
+                        "caminho_storage": nome_blob,
                         "tipo": tipo_envio,
                         "data_envio": firestore.SERVER_TIMESTAMP,
                         "status": "Pendente",
