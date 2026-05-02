@@ -42,10 +42,8 @@ def modal_comentario(index):
                                   height=150)
     
     if st.button("Salvar e Fechar", type="primary", use_container_width=True):
-        # Sincroniza o texto em todos os lugares da memória
         st.session_state.pontos_correcao[index]['texto'] = comentario_temp
         st.session_state[f"f_input_{index}"] = comentario_temp
-        
         st.session_state.ponto_para_comentar = None
         st.rerun()
 
@@ -53,25 +51,6 @@ def modal_comentario(index):
 tab_correcao, tab_temas = st.tabs(["🖋️ Corrigir Redações", "📋 Gerenciar Temas"])
 
 with tab_correcao:
-    # --- HACK DE SCROLL MAIS FORTE ---
-    # Injetamos o script para rodar no container principal do Streamlit
-    components.html(
-        """
-        <script>
-            var scroll_helper = function() {
-                var el = window.parent.document.querySelector('[data-testid="stAppViewContainer"]');
-                if (el) {
-                    el.scrollTo(0, 0);
-                }
-            }
-            scroll_helper();
-            // Executa novamente após um pequeno delay para garantir que o Streamlit terminou de renderizar
-            setTimeout(scroll_helper, 100);
-        </script>
-        """,
-        height=0
-    )
-
     if st.session_state.ponto_para_comentar is not None:
         modal_comentario(st.session_state.ponto_para_comentar)
 
@@ -110,7 +89,7 @@ with tab_correcao:
                     draw.ellipse([x-r, y-r, x+r, y+r], fill="red", outline="white", width=3)
                     draw.text((x-4, y-6), str(i+1), fill="white")
 
-                value = streamlit_image_coordinates(img_edit, key="editor_v15")
+                value = streamlit_image_coordinates(img_edit, key="editor_v16")
 
                 if value and value != st.session_state.ultimo_clique:
                     st.session_state.ultimo_clique = value
@@ -127,13 +106,12 @@ with tab_correcao:
         
         if st.button("Limpar Marcas 🗑️"):
             chaves_para_limpar = [k for k in st.session_state.keys() if k.startswith("f_input_")]
-            for k in chaves_para_limpar:
-                del st.session_state[k]
+            for k in chaves_para_limpar: del st.session_state[k]
             st.session_state.pontos_correcao = []
             st.session_state.ultimo_clique = None
             st.rerun()
 
-        with st.form("form_final_v15"):
+        with st.form("form_final_v16"):
             st.write("**Notas (Competências 1 a 5)**")
             c1, c2, c3, c4, c5 = st.columns(5)
             n1 = c1.number_input("C1", 0, 200, 160, 20)
@@ -146,11 +124,9 @@ with tab_correcao:
             lista_final = []
             if st.session_state.pontos_correcao:
                 for i, p in enumerate(st.session_state.pontos_correcao):
-                    # Forçamos o valor do input a ser o que está no session_state
                     txt = st.text_input(f"Comentário {i+1}", 
                                         value=st.session_state.get(f"f_input_{i}", p.get('texto', "")),
                                         key=f"f_input_{i}")
-                    # Atualiza a lista principal
                     p['texto'] = txt
                     lista_final.append({"x": p['x'], "y": p['y'], "texto": txt})
             else:
@@ -165,24 +141,59 @@ with tab_correcao:
                     "feedback_geral": fb_geral, "data_correcao": firestore.SERVER_TIMESTAMP
                 })
                 chaves_para_limpar = [k for k in st.session_state.keys() if k.startswith("f_input_")]
-                for k in chaves_para_limpar:
-                    del st.session_state[k]
+                for k in chaves_para_limpar: del st.session_state[k]
                 st.session_state.pontos_correcao = []
                 st.session_state.ultimo_clique = None
                 st.success("✅ Enviado!"); time.sleep(1); st.rerun()
 
-# --- ABA DE TEMAS ---
+# --- ABA DE TEMAS (ATUALIZADA) ---
 with tab_temas:
     st.title("📋 Gerenciar Temas")
-    with st.form("form_tema_v15"):
-        nome_t = st.text_input("Nome do Tema:")
-        pdf_t = st.file_uploader("PDF de Apoio:", type=["pdf"])
-        if st.form_submit_button("Cadastrar Tema"):
-            if nome_t:
-                url_pdf = ""
-                if pdf_t:
-                    b = bucket.blob(f"textos_apoio/{int(time.time())}.pdf")
-                    b.upload_from_file(pdf_t, content_type="application/pdf")
-                    b.make_public(); url_pdf = b.public_url
-                db.collection("temas").add({"nome": nome_t, "url_apoio": url_pdf, "data_criacao": firestore.SERVER_TIMESTAMP})
-                st.success("Salvo!"); time.sleep(1); st.rerun()
+    
+    # 1. FORMULÁRIO DE CRIAÇÃO
+    with st.expander("➕ Adicionar Novo Tema", expanded=True):
+        with st.form("form_tema_v16", clear_on_submit=True):
+            nome_t = st.text_input("Nome do Tema:")
+            pdf_t = st.file_uploader("PDF de Apoio (Opcional):", type=["pdf"])
+            if st.form_submit_button("Cadastrar Tema", type="primary"):
+                if nome_t.strip():
+                    url_pdf = ""
+                    if pdf_t:
+                        b = bucket.blob(f"textos_apoio/{int(time.time())}_{pdf_t.name}")
+                        b.upload_from_file(pdf_t, content_type="application/pdf")
+                        b.make_public(); url_pdf = b.public_url
+                    db.collection("temas").add({"nome": nome_t.strip(), "url_apoio": url_pdf, "data_criacao": firestore.SERVER_TIMESTAMP})
+                    st.success("Tema salvo com sucesso!")
+                    time.sleep(1); st.rerun()
+                else:
+                    st.warning("O nome do tema não pode ficar em branco.")
+
+    st.divider()
+
+    # 2. LISTA DE TEMAS COM OPÇÃO DE EXCLUSÃO
+    st.write("### 🗑️ Temas Cadastrados")
+    
+    # Busca os temas ordenados do mais novo para o mais antigo
+    temas_ref = db.collection("temas").order_by("data_criacao", direction=firestore.Query.DESCENDING).stream()
+    temas_lista = [{**t.to_dict(), 'id': t.id} for t in temas_ref]
+
+    if not temas_lista:
+        st.info("Nenhum tema cadastrado ainda.")
+    else:
+        for t in temas_lista:
+            # Cria duas colunas: uma para o texto e outra para o botão
+            col_texto, col_btn = st.columns([0.85, 0.15])
+            
+            with col_texto:
+                # Verifica se tem PDF e coloca um ícone indicativo
+                icone_pdf = "📎" if t.get('url_apoio') else "📝"
+                st.write(f"{icone_pdf} **{t.get('nome')}**")
+            
+            with col_btn:
+                # Botão de excluir específico para cada ID de tema
+                if st.button("Excluir", key=f"del_{t['id']}", use_container_width=True):
+                    db.collection("temas").document(t['id']).delete()
+                    st.error(f"Tema excluído: {t.get('nome')}")
+                    time.sleep(1); st.rerun()
+            
+            st.write("---") # Linha divisória entre os temas
