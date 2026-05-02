@@ -7,6 +7,15 @@ from google.cloud import firestore, storage
 from google.oauth2 import service_account
 from streamlit_drawable_canvas import st_canvas
 from urllib.parse import unquote
+import base64
+from io import BytesIO
+
+def converter_imagem_para_base64(img_pil):
+    """Converte a imagem PIL para uma string Base64 para o Canvas."""
+    buffered = BytesIO()
+    img_pil.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
@@ -46,76 +55,35 @@ else:
     canvas_result = None
 
     with col1:
-        st.write("### 📝 Folha de Redação")
-        
-        if redacao.get('tipo') == 'arquivo':
-            try:
-                # 1. Download do arquivo
-                url_full = redacao.get('url_arquivo', '')
-                nome_arquivo_storage = redacao.get('caminho_storage')
-                if not nome_arquivo_storage and url_full:
-                    bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
-                    nome_arquivo_storage = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
-
-                blob = bucket.blob(nome_arquivo_storage)
-                conteudo_bytes = blob.download_as_bytes()
-                
-                # 2. Preparação da Imagem com medidas fixas
-                img_original = Image.open(BytesIO(conteudo_bytes))
-                largura_display = 800
-                w, h = img_original.size
-                altura_display = int(largura_display * (h / w))
-                
-                # Redimensionamos manualmente para garantir que o CSS e o Canvas usem a MESMA altura
-                img_redimensionada = img_original.resize((largura_display, altura_display))
-                
-                comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
-                cor_pincel = COMPETENCIAS[comp_selecionada]
-
-                # --- CSS DE SOBREPOSIÇÃO TOTAL ---
-                # Usamos um margin-bottom negativo na imagem para 'sugar' o canvas para cima
-                st.markdown(f"""
-                    <style>
-                    /* 1. Bloqueia o 'fantasma' da imagem */
-                    [data-testid="stImage"] img {{
-                        pointer-events: none;
-                        -webkit-user-drag: none;
-                        user-select: none;
-                    }}
-                    /* 2. Puxa o elemento seguinte (o canvas) para cima da imagem */
-                    [data-testid="stImage"] {{
-                        margin-bottom: -{altura_display}px !important;
-                    }}
-                    /* 3. Garante que o canvas não tenha fundo branco */
-                    iframe {{
-                        background: transparent !important;
-                    }}
-                    .stCanvas {{
-                        background: transparent !important;
-                    }}
-                    </style>
-                """, unsafe_allow_html=True)
-
-                # 3. Exibição da Imagem
-                st.image(img_redimensionada) # Exibe a imagem já no tamanho certo
-                
-                # 4. Exibição do Canvas (O Vidro Transparente)
-                canvas_result = st_canvas(
-                    fill_color=cor_pincel,
-                    stroke_width=1,
-                    stroke_color="#000",
-                    background_color="rgba(0,0,0,0)", # 100% Transparente
-                    update_streamlit=True,
-                    height=altura_display,
-                    width=largura_display,
-                    drawing_mode="rect",
-                    key="canvas_final_v10", # Nova chave para limpar o cache
-                )
-                
-                st.info("💡 Clique e arraste sobre a imagem para marcar os erros.")
-
-            except Exception as e:
-                st.error(f"Erro clínico no layout: {e}")
+    st.write("### 📝 Folha de Redação")
+    
+    if redacao.get('tipo') == 'arquivo':
+        try:
+            # Processamento da imagem (mantendo o redimensionamento que já fizemos)
+            img_original = Image.open(BytesIO(conteudo_bytes))
+            largura_display = 800
+            w, h = img_original.size
+            altura_display = int(largura_display * (h / w))
+            img_redimensionada = img_original.resize((largura_display, altura_display))
+            
+            # A MÁGICA: Transformamos a imagem em código
+            imagem_b64 = converter_imagem_para_base64(img_redimensionada)
+            
+            # Agora o st_canvas recebe a imagem DIRETAMENTE no parâmetro background_image
+            canvas_result = st_canvas(
+                fill_color=cor_pincel,
+                stroke_width=1,
+                stroke_color="#000",
+                background_image=imagem_b64, # Aqui a imagem entra como dado, não como arquivo
+                update_streamlit=True,
+                height=altura_display,
+                width=largura_display,
+                drawing_mode="rect",
+                key="canvas_integrado_v1",
+            )
+            
+        except Exception as e:
+            st.error(f"Erro ao processar imagem: {e}")
         else:
             st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
 
