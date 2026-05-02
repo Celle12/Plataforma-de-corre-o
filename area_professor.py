@@ -52,7 +52,6 @@ else:
             try:
                 url_full = redacao.get('url_arquivo', '')
                 nome_arquivo_storage = redacao.get('caminho_storage')
-
                 if not nome_arquivo_storage and url_full:
                     bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
                     nome_arquivo_storage = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
@@ -60,89 +59,78 @@ else:
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_bytes = blob.download_as_bytes()
                 
-                if nome_arquivo_storage.lower().endswith(".pdf"):
-                    st.warning("⚠️ Arquivo PDF detectado.")
-                    st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
-                else:
-                    # Carregamos a imagem para calcular as dimensões reais
-                    img_original = Image.open(BytesIO(conteudo_bytes))
-                    largura_display = 800
-                    w_orig, h_orig = img_original.size
-                    
-                    # Cálculo da altura mantendo a proporção
-                    # $$altura\_display = largura\_display \times \left( \frac{h\_orig}{w\_orig} \right)$$
-                    altura_display = int(largura_display * (h_orig / w_orig))
-                    
-                    comp_selecionada = st.radio("Selecione a competência:", list(COMPETENCIAS.keys()), horizontal=True)
-                    cor_pincel = COMPETENCIAS[comp_selecionada]
+                img_original = Image.open(BytesIO(conteudo_bytes))
+                largura_display = 800
+                w_orig, h_orig = img_original.size
+                altura_display = int(largura_display * (h_orig / w_orig))
+                
+                comp_selecionada = st.radio("Selecione a competência:", list(COMPETENCIAS.keys()), horizontal=True)
+                cor_pincel = COMPETENCIAS[comp_selecionada]
 
-                    # --- A "TRAVA" MECÂNICA (CSS) ---
-                    # 1. pointer-events: none -> Faz o mouse "atravessar" a imagem e clicar no Canvas.
-                    # 2. margin-top negativo -> Sobe o Canvas para cobrir a imagem perfeitamente.
-                    st.markdown(f"""
-                        <style>
-                        div[data-testid="stImage"] {{
-                            pointer-events: none;
-                            user-select: none;
-                        }}
-                        iframe[title="streamlit_drawable_canvas.st_canvas"] {{
-                            margin-top: -{altura_display + 48}px;
-                            z-index: 99;
-                        }}
-                        </style>
-                    """, unsafe_allow_html=True)
+                # --- CSS PARA TORNAR O VIDRO TRANSPARENTE E TRAVAR A IMAGEM ---
+                st.markdown(f"""
+                    <style>
+                    /* 1. Torna a imagem intocável (evita o fantasma) */
+                    div[data-testid="stImage"] img {{
+                        pointer-events: none;
+                        user-select: none;
+                        -webkit-user-drag: none;
+                    }}
+                    /* 2. Força o componente de desenho a ser 100% transparente */
+                    iframe {{
+                        background: transparent !important;
+                    }}
+                    .stCanvas {{
+                        background: transparent !important;
+                        margin-top: -{altura_display + 48}px;
+                        z-index: 10;
+                    }}
+                    </style>
+                """, unsafe_allow_html=True)
 
-                    # Passo 1: Mostra a imagem (Camada de baixo)
-                    st.image(img_original, width=largura_display)
-                    
-                    # Passo 2: Canvas Transparente (Camada de cima)
-                    canvas_result = st_canvas(
-                        fill_color=cor_pincel,
-                        stroke_width=1,
-                        stroke_color="#000",
-                        background_color="rgba(0, 0, 0, 0)", 
-                        update_streamlit=True,
-                        height=altura_display,
-                        width=largura_display,
-                        drawing_mode="rect",
-                        key="canvas_glass_v1",
-                    )
-                    
+                # Passo 1: Mostra a imagem (Camada de Baixo)
+                st.image(img_original, width=largura_display)
+                
+                # Passo 2: Canvas Transparente (Camada de Cima)
+                canvas_result = st_canvas(
+                    fill_color=cor_pincel,
+                    stroke_width=1,
+                    stroke_color="#000",
+                    background_color="rgba(255, 255, 255, 0)", # Transparência absoluta
+                    update_streamlit=True,
+                    height=altura_display,
+                    width=largura_display,
+                    drawing_mode="rect",
+                    key="canvas_crystal_clear",
+                )
+                
             except Exception as e:
-                st.error(f"Erro ao carregar imagem: {e}")
+                st.error(f"Erro ao carregar: {e}")
         else:
             st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
 
     with col2:
         st.write("### 📊 Notas e Comentários")
         with st.form("form_correcao"):
-            n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
-            n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
-            n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
-            n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
-            n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
+            # Sliders de notas
+            n1 = st.slider("C1", 0, 200, 0, 40); n2 = st.slider("C2", 0, 200, 0, 40)
+            n3 = st.slider("C3", 0, 200, 0, 40); n4 = st.slider("C4", 0, 200, 0, 40)
+            n5 = st.slider("C5", 0, 200, 0, 40)
             
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
                 objetos = canvas_result.json_data["objects"]
                 if objetos:
-                    st.write("#### 💬 Comentários nos destaques:")
                     for i, obj in enumerate(objetos):
-                        cor_hex = obj['fill']
                         comentario = st.text_input(f"Destaque {i+1}", key=f"coment_{i}")
                         comentarios_caixinhas.append({
-                            "id_caixa": i,
-                            "comentario": comentario,
-                            "posicao": {
-                                "left": obj['left'],
-                                "top": obj['top'],
-                                "color": cor_hex
-                            }
+                            "id_caixa": i, "comentario": comentario,
+                            "posicao": {"left": obj['left'], "top": obj['top'], "color": obj['fill']}
                         })
 
-            feedback_geral = st.text_area("Feedback Geral Final:", height=150)
+            feedback_geral = st.text_area("Feedback Geral:", height=100)
 
-            if st.form_submit_button("Finalizar e Enviar", type="primary"):
+            if st.form_submit_button("Finalizar Correção", type="primary"):
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "notas": [n1, n2, n3, n4, n5],
@@ -151,5 +139,5 @@ else:
                     "anotacoes_detalhadas": comentarios_caixinhas,
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
-                st.success("✅ Correção enviada!")
+                st.success("✅ Sucesso!")
                 time.sleep(1); st.rerun()
