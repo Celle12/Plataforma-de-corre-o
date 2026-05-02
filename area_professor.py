@@ -22,7 +22,7 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 2. Estado da Sessão (Source of Truth)
+# 2. Estado da Sessão
 if "pontos_correcao" not in st.session_state:
     st.session_state.pontos_correcao = []
 if "ponto_para_comentar" not in st.session_state:
@@ -30,22 +30,22 @@ if "ponto_para_comentar" not in st.session_state:
 
 # --- FUNÇÃO DO POP-UP (MODAL) ---
 @st.dialog("📝 Adicionar Comentário")
-def modal_comentario():
-    index = st.session_state.ponto_para_comentar
-    # Garante que estamos editando o ponto certo
+def modal_comentario(index):
+    st.write(f"### Erro {index + 1}")
+    
+    # Pegamos o texto atual para não perder nada
     ponto_atual = st.session_state.pontos_correcao[index]
     
-    st.write(f"### Erro {index + 1}")
-    # Campo de texto que carrega o que já existe (se houver)
-    novo_texto = st.text_area("O que o aluno precisa corrigir aqui?", 
-                              value=ponto_atual.get('texto', ""), 
-                              height=150,
-                              key="input_modal_temp")
+    # Usamos uma chave única para este campo de texto
+    comentario_temp = st.text_area("Descreva o erro:", 
+                                  value=ponto_atual.get('texto', ""), 
+                                  height=150,
+                                  key=f"temp_text_{index}")
     
-    if st.button("Salvar Comentário", type="primary", use_container_width=True):
-        # Atualiza o comentário no estado global ANTES de fechar
-        st.session_state.pontos_correcao[index]['texto'] = novo_texto
-        # Limpa o gatilho e força o fechamento do modal
+    if st.button("Confirmar e Fechar", type="primary", use_container_width=True):
+        # Salvamos o texto diretamente no ponto dentro da lista
+        st.session_state.pontos_correcao[index]['texto'] = comentario_temp
+        # Limpamos o gatilho ANTES do rerun
         st.session_state.ponto_para_comentar = None
         st.rerun()
 
@@ -53,21 +53,23 @@ def modal_comentario():
 tab_correcao, tab_temas = st.tabs(["🖋️ Corrigir Redações", "📋 Gerenciar Temas"])
 
 with tab_correcao:
-    # Verifica se deve abrir o modal (Colocado aqui para garantir o fluxo)
-    if st.session_state.ponto_para_comentar is not None:
-        modal_comentario()
-
     st.title("⚖️ Sistema de Correção")
+    
+    # DISPARADOR DO MODAL: Deve vir antes de carregar o resto da UI
+    if st.session_state.ponto_para_comentar is not None:
+        modal_comentario(st.session_state.ponto_para_comentar)
+
+    # Busca de Redações
     redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
     lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
     if not lista:
-        st.info("Tudo corrigido por aqui! ☕")
+        st.info("Tudo corrigido! ☕")
     else:
-        escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" for r in lista])
-        redacao = next(r for r in lista if f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" == escolha)
+        escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome')} - {r.get('tema')}" for r in lista])
+        redacao = next(r for r in lista if f"{r.get('aluno_nome')} - {r.get('tema')}" == escolha)
 
-        # --- EXIBIÇÃO DA IMAGEM ---
+        # --- ÁREA DA IMAGEM ---
         caminho = redacao.get('caminho_storage')
         url_full = redacao.get('url_arquivo', '')
         if not caminho and url_full:
@@ -90,37 +92,30 @@ with tab_correcao:
                     draw.ellipse([x-r, y-r, x+r, y+r], fill="red", outline="white", width=3)
                     draw.text((x-4, y-6), str(i+1), fill="white")
 
-                value = streamlit_image_coordinates(img_edit, key="editor_v8")
+                # Captura do clique
+                value = streamlit_image_coordinates(img_edit, key="editor_v9")
 
                 if value:
                     novo_p = {"x": value["x"], "y": value["y"], "texto": ""}
                     if novo_p not in st.session_state.pontos_correcao:
                         st.session_state.pontos_correcao.append(novo_p)
-                        # Define o índice para o pop-up e recarrega para abrir
                         st.session_state.ponto_para_comentar = len(st.session_state.pontos_correcao) - 1
                         st.rerun()
 
             except Exception as e:
-                st.error(f"Erro no carregamento: {e}")
+                st.error(f"Erro: {e}")
 
         st.divider()
 
-        # --- PAINEL DE NOTAS ---
-        st.write("### 📊 Avaliação Final")
+        # --- ÁREA DE NOTAS E REVISÃO ---
+        st.write("### 📊 Avaliação e Notas")
         
-        with st.expander("🚫 Negar Arquivo"):
-            motivo = st.selectbox("Motivo:", ["Imagem Ilegível", "Folha em Branco", "Arquivo Errado"])
-            if st.button("Confirmar Negativa"):
-                db.collection("redacoes").document(redacao['id']).update({"status": "Negada", "motivo_negativa": motivo})
-                st.session_state.pontos_correcao = []
-                st.rerun()
-
-        if st.button("Limpar Todas as Marcas 🗑️"):
+        if st.button("Limpar Marcas 🗑️"):
             st.session_state.pontos_correcao = []
             st.rerun()
 
+        # Usamos o formulário APENAS para o envio final
         with st.form("form_final"):
-            st.write("#### Notas (20 em 20)")
             c1, c2, c3, c4, c5 = st.columns(5)
             n1 = c1.number_input("C1", 0, 200, 160, 20)
             n2 = c2.number_input("C2", 0, 200, 160, 20)
@@ -130,41 +125,39 @@ with tab_correcao:
             
             st.write("#### 📝 Revisão dos Comentários")
             
-            # Reconstroi a lista de comentários para garantir persistência
-            comentarios_atualizados = []
+            # Reconstruímos a lista para garantir que os dados do modal apareçam aqui
+            lista_final_anotacoes = []
             if st.session_state.pontos_correcao:
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
-                    # O segredo: 'value' puxa do session_state, mas o 'key' garante que o Streamlit não perca o dado
-                    txt_editado = st.text_input(f"Erro {i+1}", 
+                    # Aqui é onde o texto digitado no modal DEVE aparecer
+                    txt_revisao = st.text_input(f"Comentário do Erro {i+1}", 
                                                 value=ponto.get('texto', ""), 
-                                                key=f"input_final_{i}")
-                    comentarios_atualizados.append({"x": ponto['x'], "y": ponto['y'], "texto": txt_editado})
+                                                key=f"final_edit_{i}")
+                    lista_final_anotacoes.append({"x": ponto['x'], "y": ponto['y'], "texto": txt_revisao})
             else:
-                st.info("Marque pontos na imagem para comentar.")
+                st.info("Nenhum erro marcado ainda.")
 
-            feedback_geral = st.text_area("Conclusão/Feedback Geral", height=100)
+            feedback_geral = st.text_area("Feedback Geral")
             
-            if st.form_submit_button("Finalizar e Enviar Correção", type="primary", use_container_width=True):
+            if st.form_submit_button("Enviar Correção Completa", type="primary", use_container_width=True):
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
-                    "anotacoes_detalhadas": comentarios_atualizados,
+                    "anotacoes_detalhadas": lista_final_anotacoes,
                     "notas": [n1, n2, n3, n4, n5],
                     "nota_final": n1+n2+n3+n4+n5,
                     "feedback_geral": feedback_geral,
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
                 st.session_state.pontos_correcao = []
-                st.success("✅ Enviado!")
+                st.success("✅ Correção enviada!")
                 time.sleep(1); st.rerun()
 
-# ==========================================
-# ABA 2: TEMAS
-# ==========================================
+# --- ABA DE TEMAS ---
 with tab_temas:
     st.title("📋 Gerenciar Temas")
-    with st.form("novo_tema", clear_on_submit=True):
-        nome_t = st.text_input("Novo Tema:")
-        pdf_t = st.file_uploader("PDF de Apoio:", type=["pdf"])
+    with st.form("novo_tema"):
+        nome_t = st.text_input("Tema:")
+        pdf_t = st.file_uploader("PDF:", type=["pdf"])
         if st.form_submit_button("Cadastrar"):
             if nome_t:
                 url_pdf = ""
@@ -174,5 +167,5 @@ with tab_temas:
                     blob.make_public()
                     url_pdf = blob.public_url
                 db.collection("temas").add({"nome": nome_t, "url_apoio": url_pdf, "data_criacao": firestore.SERVER_TIMESTAMP})
-                st.success("Tema salvo!")
+                st.success("Salvo!")
                 time.sleep(1); st.rerun()
