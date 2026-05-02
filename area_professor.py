@@ -45,8 +45,8 @@ for r in redacoes_ref:
 if not lista_redacoes:
     st.info("Nenhuma redação pendente por enquanto! ☕")
 else:
-    # Seleção da Redação
-    opcoes = {f"{r['aluno_email']} - {r['tema']}": r for r in lista_redacoes}
+    # Agora usamos o nome em vez do e-mail no menu
+    opcoes = {f"{r.get('aluno_nome', 'Sem Nome')} - {r['tema']}": r for r in lista_redacoes}
     escolha = st.selectbox("Selecione uma redação para corrigir:", list(opcoes.keys()))
     redacao = opcoes[escolha]
 
