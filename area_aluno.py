@@ -38,15 +38,19 @@ firebase = pyrebase.initialize_app(firebaseConfig)
 auth = firebase.auth()
 db, bucket = iniciar_servicos()
 
+# Inicialização do session_state
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 if 'email_usuario' not in st.session_state:
     st.session_state.email_usuario = ""
+if 'nome_usuario' not in st.session_state:
+    st.session_state.nome_usuario = ""
 
-# --- LÓGICA DE LOGIN (Igual à anterior) ---
+# --- LÓGICA DE ACESSO ---
 if st.session_state.logado == False:
     st.title("🔐 Acesso à Plataforma")
     aba1, aba2 = st.tabs(["Login", "Cadastrar"])
+    
     with aba1:
         with st.form("login_form"):
             email_input = st.text_input("E-mail")
@@ -54,27 +58,52 @@ if st.session_state.logado == False:
             if st.form_submit_button("Entrar", type="primary"):
                 try:
                     user = auth.sign_in_with_email_and_password(email_input, senha_input)
+                    
+                    # BUSCA O NOME NO FIRESTORE (Alteração 1)
+                    doc_ref = db.collection("usuarios").document(email_input).get()
+                    if doc_ref.exists:
+                        st.session_state.nome_usuario = doc_ref.to_dict().get("nome")
+                    else:
+                        st.session_state.nome_usuario = email_input # Caso não encontre, usa o e-mail
+
                     st.session_state.logado = True
                     st.session_state.email_usuario = email_input
                     st.rerun()
                 except Exception as e:
                     if "RerunException" not in str(type(e)):
                         st.error("Dados incorretos.")
+    
     with aba2:
         with st.form("signup_form"):
+            # NOVO CAMPO DE NOME (Alteração 2)
+            nome_completo = st.text_input("Nome Completo")
             email_novo = st.text_input("Novo E-mail")
             senha_nova = st.text_input("Nova Senha", type="password")
+            
             if st.form_submit_button("Criar Conta"):
-                try:
-                    auth.create_user_with_email_and_password(email_novo, senha_nova)
-                    st.success("Conta criada! Faça o login.")
-                except:
-                    st.error("Erro ao criar conta.")
+                if nome_completo and email_novo and senha_nova:
+                    try:
+                        auth.create_user_with_email_and_password(email_novo, senha_nova)
+                        
+                        # SALVA O NOME VINCULADO AO E-MAIL NO FIRESTORE
+                        db.collection("usuarios").document(email_novo).set({
+                            "nome": nome_completo,
+                            "email": email_novo
+                        })
+                        
+                        st.success("Conta criada! Agora faça o login na aba ao lado.")
+                    except:
+                        st.error("Erro ao criar conta. Verifique se o e-mail é válido.")
+                else:
+                    st.warning("Por favor, preencha todos os campos.")
 
 # --- ÁREA DO ALUNO ---
 elif st.session_state.logado == True:
     st.sidebar.title("Painel do Aluno")
-    st.sidebar.info(f"👤 {st.session_state.email_usuario}")
+    # Mostra o nome real se estiver disponível
+    exibir_nome = st.session_state.nome_usuario if st.session_state.nome_usuario else st.session_state.email_usuario
+    st.sidebar.info(f"👤 {exibir_nome}")
+    
     if st.sidebar.button("Sair da Conta"):
         st.session_state.logado = False
         st.rerun()
@@ -101,17 +130,16 @@ elif st.session_state.logado == True:
                     url_arquivo = ""
                     tipo_envio = "texto"
 
-                    # Lógica para Upload de Arquivo
                     if metodo == "Anexar Arquivo (Foto/PDF)" and arquivo_upload:
                         nome_blob = f"redacoes/{st.session_state.email_usuario}_{int(time.time())}_{arquivo_upload.name}"
                         blob = bucket.blob(nome_blob)
                         blob.upload_from_file(arquivo_upload)
-                        # Torna o arquivo acessível e pega a URL
                         url_arquivo = blob.public_url
                         tipo_envio = "arquivo"
                     
-                    # Salva no Firestore
+                    # PACOTE DE DADOS COM O NOME DO ALUNO (Alteração 3)
                     nova_redacao = {
+                        "aluno_nome": st.session_state.nome_usuario, # Nome agora vai aqui
                         "aluno_email": st.session_state.email_usuario,
                         "tema": tema,
                         "texto": texto_redacao,
