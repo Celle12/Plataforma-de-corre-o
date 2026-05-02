@@ -170,6 +170,7 @@ with tab_temas:
                     nome_blob = f"textos_apoio/{int(time.time())}_{arquivo_apoio.name}"
                     blob = bucket.blob(nome_blob)
                     blob.upload_from_file(arquivo_apoio, content_type="application/pdf")
+                    blob.make_public()
                     url_pdf = blob.public_url # Pega o link gerado
 
                 db.collection("temas").add({
