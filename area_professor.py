@@ -82,28 +82,52 @@ else:
 
     with col2:
         st.write("### 📊 Notas e Comentários")
+        
         with st.form("form_correcao"):
+            # 1. Notas das Competências
             n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
             n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
             n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
             n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
             n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
             
-            nota_total = n1 + n2 + n3 + n4 + n5
-            st.metric("Nota Final", nota_total)
+            st.divider()
+            
+            # 2. Comentários por Caixinha (A Mágica acontece aqui)
+            comentarios_caixinhas = []
+            if redacao.get('tipo') == 'arquivo' and canvas_result.json_data:
+                objetos = canvas_result.json_data["objects"]
+                if objetos:
+                    st.write("#### 💬 Comentários nos destaques:")
+                    for i, obj in enumerate(objetos):
+                        # Identifica a cor para saber qual competência é
+                        cor_hex = obj['fill']
+                        # Input de texto para cada caixinha desenhada
+                        comentario = st.text_input(f"Comentário para o Destaque {i+1}", key=f"coment_{i}")
+                        comentarios_caixinhas.append({
+                            "id_caixa": i,
+                            "comentario": comentario,
+                            "posicao": {
+                                "left": obj['left'],
+                                "top": obj['top'],
+                                "width": obj['width'],
+                                "height": obj['height'],
+                                "color": cor_hex
+                            }
+                        })
 
-            feedback = st.text_area("Comentário Geral para o Aluno:", height=200)
+            st.divider()
+            feedback_geral = st.text_area("Feedback Geral Final:", height=150)
 
-            if st.form_submit_button("Finalizar Correção", type="primary"):
-                # Salva anotações do canvas se houver
-                anotacoes = canvas_result.json_data["objects"] if redacao.get('tipo') == 'arquivo' else []
-
+            if st.form_submit_button("Finalizar e Enviar", type="primary"):
+                nota_total = n1 + n2 + n3 + n4 + n5
+                
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "notas": [n1, n2, n3, n4, n5],
                     "nota_final": nota_total,
-                    "feedback_geral": feedback,
-                    "anotacoes_visuais": anotacoes,
+                    "feedback_geral": feedback_geral,
+                    "anotacoes_detalhadas": comentarios_caixinhas, # Salva a lista completa
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
                 st.success("✅ Correção enviada com sucesso!")
