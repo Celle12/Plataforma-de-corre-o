@@ -19,7 +19,6 @@ firebaseConfig = {
   "storageBucket": "plataforma-redacao-de0f3.firebasestorage.app",
   "messagingSenderId": "105466681652",
   "appId": "1:105466681652:web:13438e4cbd600a1c3a2d61",
-  "databaseURL": "" 
 }
 
 @st.cache_resource
@@ -43,25 +42,25 @@ if 'email_usuario' not in st.session_state:
 if 'nome_usuario' not in st.session_state:
     st.session_state.nome_usuario = ""
 
-# --- LÓGICA DE ACESSO ---
+# --- LÓGICA DE LOGIN (CORRIGIDA PARA 1 CLIQUE) ---
 if not st.session_state.logado:
     st.title("🔐 Acesso à Plataforma")
     aba1, aba2 = st.tabs(["Login", "Cadastrar"])
     
     with aba1:
-        with st.form("login_form"):
-            email_input = st.text_input("E-mail")
-            senha_input = st.text_input("Senha", type="password")
-            if st.form_submit_button("Entrar", type="primary"):
-                try:
-                    user = auth.sign_in_with_email_and_password(email_input, senha_input)
-                    doc_ref = db.collection("usuarios").document(email_input).get()
-                    st.session_state.nome_usuario = doc_ref.to_dict().get("nome") if doc_ref.exists else email_input
-                    st.session_state.logado = True
-                    st.session_state.email_usuario = email_input
-                    st.rerun()
-                except:
-                    st.error("Dados incorretos.")
+        # Removido o form para evitar o erro de duplo clique no login
+        email_input = st.text_input("E-mail", key="login_email")
+        senha_input = st.text_input("Senha", type="password", key="login_senha")
+        if st.button("Entrar", type="primary"):
+            try:
+                user = auth.sign_in_with_email_and_password(email_input, senha_input)
+                doc_ref = db.collection("usuarios").document(email_input).get()
+                st.session_state.nome_usuario = doc_ref.to_dict().get("nome") if doc_ref.exists else email_input
+                st.session_state.email_usuario = email_input
+                st.session_state.logado = True
+                st.rerun() # Rerun imediato
+            except:
+                st.error("E-mail ou senha incorretos.")
     
     with aba2:
         with st.form("signup_form"):
@@ -83,13 +82,12 @@ else:
     st.sidebar.info(f"👤 {st.session_state.nome_usuario}")
     
     if st.sidebar.button("Sair da Conta"):
-        st.session_state.logado = False
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
 
-    # TABS PRINCIPAIS
     tab_envio, tab_status = st.tabs(["🚀 Enviar Nova Redação", "📂 Acompanhar Minhas Redações"])
 
-    # --- TAB 1: ENVIO ---
     with tab_envio:
         st.title("📝 Envio de Redação")
         tema = st.selectbox("Selecione o tema:", ["Escolha...", "Impactos da IA", "Saúde Mental", "Escolaridades"])
@@ -126,36 +124,32 @@ else:
                         })
                         st.success("Enviado com sucesso!")
                         st.balloons()
-                    else:
-                        st.warning("Adicione conteúdo antes de enviar.")
 
-    # --- TAB 2: STATUS E CORREÇÃO ---
     with tab_status:
         st.title("📂 Histórico de Correções")
         
-        redacoes_ref = db.collection("redacoes").where("aluno_email", "==", st.session_state.email_usuario).order_by("data_envio", direction=firestore.Query.DESCENDING).stream()
-        minhas_redacoes = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
+        # CORREÇÃO DO ERRO DO PRINT: Removido o order_by do Firestore para evitar o erro de Precondition
+        redacoes_query = db.collection("redacoes").where("aluno_email", "==", st.session_state.email_usuario).stream()
+        minhas_redacoes = [{**r.to_dict(), 'id': r.id} for r in redacoes_query]
 
         if not minhas_redacoes:
             st.info("Você ainda não tem redações enviadas.")
         else:
-            escolha = st.selectbox("Selecione a redação para detalhes:", 
-                                 [f"{r['tema']} - {r['status']}" for r in minhas_redacoes])
+            # Organizamos por data aqui no Python mesmo
+            minhas_redacoes.sort(key=lambda x: x.get('data_envio') or 0, reverse=True)
+            
+            escolha = st.selectbox("Selecione a redação:", [f"{r['tema']} - {r['status']}" for r in minhas_redacoes])
             r = next(red for red in minhas_redacoes if f"{red['tema']} - {red['status']}" == escolha)
 
             st.divider()
 
-            # CASE: PENDENTE
             if r['status'] == "Pendente":
-                st.warning("⏳ Sua redação está na fila de correção. Aguarde o professor.")
+                st.warning("⏳ Sua redação está na fila de correção.")
 
-            # CASE: NEGADA
             elif r['status'] == "Negada":
-                st.error(f"❌ Redação não aceita: {r.get('motivo_negativa')}")
-                st.info(f"**Motivo:** {r.get('obs_negativa')}")
-                st.write("---")
-                st.subheader("Reenviar Arquivo")
-                novo_arq = st.file_uploader("Anexe uma foto nítida da redação:", type=["jpg", "png", "jpeg"], key="reenvio")
+                st.error(f"❌ Problema: {r.get('motivo_negativa')}")
+                st.info(f"**Obs:** {r.get('obs_negativa')}")
+                novo_arq = st.file_uploader("Reenviar foto:", type=["jpg", "png", "jpeg"], key="reenvio")
                 if st.button("Confirmar Reenvio"):
                     if novo_arq:
                         nome_blob = f"redacoes/{st.session_state.email_usuario}_RE_{int(time.time())}.jpg"
@@ -167,49 +161,33 @@ else:
                             "status": "Pendente",
                             "motivo_negativa": firestore.DELETE_FIELD
                         })
-                        st.success("Reenviado! Voltando para a fila de correção.")
-                        time.sleep(1.5); st.rerun()
+                        st.success("Reenviado!")
+                        time.sleep(1); st.rerun()
 
-            # CASE: CORRIGIDA
             elif r['status'] == "Corrigida":
-                st.success(f"🎉 Correção Concluída! Nota: {r.get('nota_final', 0)}")
-                
-                col_n1, col_n2, col_n3, col_n4, col_n5 = st.columns(5)
+                st.success(f"🎉 Nota Final: {r.get('nota_final', 0)}")
                 notas = r.get('notas', [0,0,0,0,0])
-                col_n1.metric("C1", notas[0]); col_n2.metric("C2", notas[1])
-                col_n3.metric("C3", notas[2]); col_n4.metric("C4", notas[3])
-                col_n5.metric("C5", notas[4])
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("C1", notas[0]); c2.metric("C2", notas[1]); c3.metric("C3", notas[2])
+                c4.metric("C4", notas[3]); c5.metric("C5", notas[4])
 
-                tab_imagem, tab_comentarios = st.tabs(["🖼️ Folha Corrigida", "💬 Detalhes dos Erros"])
-
-                with tab_imagem:
+                t_img, t_com = st.tabs(["🖼️ Ver Folha", "💬 Comentários"])
+                with t_img:
                     if r.get('caminho_storage'):
                         try:
                             blob = bucket.blob(r['caminho_storage'])
-                            img_bytes = blob.download_as_bytes()
-                            img = Image.open(BytesIO(img_bytes)).convert("RGB")
-                            
-                            # RECONSTRUÇÃO DAS MARCAS (Escala 1000px)
-                            LARGURA = 1000
-                            w_orig, h_orig = img.size
-                            img = img.resize((LARGURA, int(LARGURA * (h_orig / w_orig))))
+                            img = Image.open(BytesIO(blob.download_as_bytes())).convert("RGB")
+                            # Desenhar marcas (escala 1000px)
+                            L = 1000
+                            img = img.resize((L, int(L * (img.size[1]/img.size[0]))))
                             draw = ImageDraw.Draw(img)
-                            
                             for i, anot in enumerate(r.get('anotacoes_detalhadas', [])):
                                 x, y = anot['x'], anot['y']
-                                raio = 18
-                                draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
+                                draw.ellipse([x-18, y-18, x+18, y+18], fill="red", outline="white", width=4)
                                 draw.text((x-5, y-8), str(i+1), fill="white")
-                            
                             st.image(img, use_container_width=True)
-                        except:
-                            st.error("Erro ao carregar a imagem da folha.")
-                    else:
-                        st.text_area("Texto enviado:", r.get('texto'), height=300, disabled=True)
-
-                with tab_comentarios:
-                    st.write("### Feedback do Professor")
-                    st.info(r.get('feedback_geral'))
-                    st.write("---")
-                    for anot in r.get('anotacoes_detalhadas', []):
-                        st.write(f"📍 **Ponto {r.get('anotacoes_detalhadas').index(anot)+1}:** {anot['texto']}")
+                        except: st.error("Erro ao carregar imagem.")
+                with t_com:
+                    st.info(f"**Feedback Geral:** {r.get('feedback_geral')}")
+                    for i, anot in enumerate(r.get('anotacoes_detalhadas', [])):
+                        st.write(f"📍 **Ponto {i+1}:** {anot['texto']}")
