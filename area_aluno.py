@@ -6,12 +6,12 @@ st.set_page_config(page_title="Área do Aluno - Redação", page_icon="📝", la
 
 # 2. Configuração do Firebase (COLE SUAS CHAVES AQUI)
 firebaseConfig = {
-  "apiKey": "SUA_API_KEY_AQUI",
-  "authDomain": "SEU_PROJETO.firebaseapp.com",
-  "projectId": "SEU_PROJETO",
-  "storageBucket": "SEU_PROJETO.appspot.com",
-  "messagingSenderId": "NUMERO",
-  "appId": "SEU_APP_ID",
+  "apiKey": "AIzaSyBBxjGQkN_b-keKwXw9KQq-W8l76D6C2zA",
+  "authDomain": "plataforma-redacao-de0f3.firebaseapp.com",
+  "projectId": "plataforma-redacao-de0f3",
+  "storageBucket": "plataforma-redacao-de0f3.firebasestorage.app",
+  "messagingSenderId": "105466681652",
+  "appId": "1:105466681652:web:13438e4cbd600a1c3a2d61",
   "databaseURL": "" # Se não tiver, pode deixar vazio
 }
 
