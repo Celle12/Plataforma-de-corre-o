@@ -93,16 +93,21 @@ else:
 
     tab_envio, tab_status = st.tabs(["🚀 Enviar Nova Redação", "📂 Acompanhar Minhas Redações"])
 
-    # --- TAB DE ENVIO ---
+    # --- TAB DE ENVIO (CORRIGIDA) ---
     with tab_envio:
         st.title("📝 Envio de Redação")
+        
+        # Busca temas dinâmicos do banco de dados
         temas_ref = db.collection("temas").stream()
-    lista_temas = [t.to_dict()['nome'] for t in temas_ref]
-    
-    tema = st.selectbox("Selecione o tema:", ["Escolha..."] + lista_temas)
+        lista_temas = [t.to_dict()['nome'] for t in temas_ref]
+        
+        # Seletor agora dentro da Tab
+        tema = st.selectbox("Selecione o tema:", ["Escolha..."] + lista_temas)
         
         if tema != "Escolha...":
+            st.subheader(f"Tema: {tema}")
             metodo = st.radio("Formato:", ["Digitar Texto", "Anexar Arquivo"], horizontal=True)
+            
             with st.form("envio_redacao", clear_on_submit=True):
                 if metodo == "Digitar Texto":
                     texto_redacao = st.text_area("Sua redação:", height=300)
@@ -131,7 +136,7 @@ else:
                             "data_envio": firestore.SERVER_TIMESTAMP,
                             "status": "Pendente"
                         })
-                        st.success("Enviado com sucesso!")
+                        st.success("🚀 Redação enviada com sucesso!")
                         st.balloons()
                     else:
                         st.warning("Adicione conteúdo antes de enviar.")
@@ -183,7 +188,6 @@ else:
                 t_img, t_com = st.tabs(["🖼️ Ver Folha Interativa", "💬 Resumo dos Comentários"])
                 
                 with t_img:
-                    # Lógica robusta de busca da imagem (Igual a do professor)
                     caminho = r.get('caminho_storage')
                     url_full = r.get('url_arquivo', '')
                     if not caminho and url_full:
@@ -193,21 +197,15 @@ else:
 
                     if caminho:
                         try:
-                            # 1. Baixar a imagem original
                             blob = bucket.blob(caminho)
                             img_bytes = blob.download_as_bytes()
                             img = Image.open(BytesIO(img_bytes)).convert("RGB")
                             
-                            # 2. Calibrar para 1000px (A MESMA MIRA DO PROFESSOR)
                             LARGURA = 1000
-                            w_orig, h_orig = img.size
-                            ALTURA = int(LARGURA * (h_orig / w_orig))
+                            ALTURA = int(LARGURA * (img.size[1] / img.size[0]))
                             img = img.resize((LARGURA, ALTURA))
 
-                            # 3. Criar gráfico interativo com Plotly
                             fig = go.Figure()
-                            
-                            # Adicionar a imagem como fundo (papel de parede)
                             fig.add_layout_image(
                                 dict(
                                     source=img, xref="x", yref="y",
@@ -216,48 +214,36 @@ else:
                                 )
                             )
 
-                            # Ajustar os eixos (Y invertido para bater com a imagem)
                             fig.update_xaxes(visible=False, range=[0, LARGURA])
                             fig.update_yaxes(visible=False, range=[ALTURA, 0], scaleanchor="x", scaleratio=1)
 
-                            # 4. Adicionar os pontos com hover (etiquetas flutuantes)
                             anotacoes = r.get('anotacoes_detalhadas', [])
                             if anotacoes:
                                 xs = [a['x'] for a in anotacoes]
                                 ys = [a['y'] for a in anotacoes]
                                 numeros = [str(i+1) for i in range(len(anotacoes))]
-                                
-                                # O texto que vai aparecer no "balãozinho" quando passar o mouse
                                 textos_hover = [f"<b>Erro {i+1}</b><br>{a['texto']}" for i, a in enumerate(anotacoes)]
 
                                 fig.add_trace(go.Scatter(
-                                    x=xs, y=ys,
-                                    mode='markers+text',
-                                    text=numeros,
+                                    x=xs, y=ys, mode='markers+text', text=numeros,
                                     textposition="middle center",
                                     textfont=dict(color='white', size=14, family="Arial Black"),
                                     marker=dict(size=26, color='rgba(255, 0, 0, 0.9)', line=dict(color='white', width=3)),
-                                    hovertext=textos_hover,
-                                    hoverinfo="text", # Mostra só o texto programado
-                                    showlegend=False
+                                    hovertext=textos_hover, hoverinfo="text", showlegend=False
                                 ))
 
-                            # Remover margens para focar 100% na redação
                             fig.update_layout(
                                 margin=dict(l=0, r=0, t=0, b=0),
-                                height=ALTURA,
-                                paper_bgcolor="rgba(0,0,0,0)",
-                                plot_bgcolor="rgba(0,0,0,0)",
-                                hovermode="closest"
+                                height=ALTURA, paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)", hovermode="closest"
                             )
 
-                            # Renderizar o gráfico no Streamlit
                             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
                         except Exception as e:
                             st.error(f"Erro ao carregar a imagem interativa: {e}")
                     else:
-                        st.info("Nenhuma imagem atrelada a esta redação. Foi enviada como texto?")
+                        st.info("Foi enviada como texto.")
                         st.text_area("Texto enviado:", r.get('texto'), height=300, disabled=True)
 
                 with t_com:
