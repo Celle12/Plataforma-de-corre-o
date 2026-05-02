@@ -1,25 +1,16 @@
 import streamlit as st
 import json
 import time
-import base64
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw
 from google.cloud import firestore, storage
 from google.oauth2 import service_account
-from streamlit_drawable_canvas import st_canvas
+from streamlit_image_coordinates import streamlit_image_coordinates
 from urllib.parse import unquote
 
-# 1. Função de Conversão (A "chave" para a imagem aparecer)
-def converter_imagem_para_base64(img_pil):
-    buffered = BytesIO()
-    img_pil.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
-
-# 2. Configuração da Página
+# 1. Configuração e Conexão
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
-# 3. Conexão com Firestore e Storage
 @st.cache_resource
 def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
@@ -31,103 +22,74 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 4. Estilização
-COMPETENCIAS = {
-    "C1 - Gramática": "#0000FF33", "C2 - Repertório": "#00FF0033",
-    "C3 - Argumentação": "#FFFF0033", "C4 - Coesão": "#FFA50033", "C5 - Proposta": "#FF000033"
-}
+# 2. Estado da Sessão (Para guardar os cliques)
+if "pontos_correcao" not in st.session_state:
+    st.session_state.pontos_correcao = []
 
-st.title("⚖️ Painel de Correção Profissional")
+st.title("⚖️ Sistema de Correção por Pontos")
 
-# 5. Listagem de Redações Pendentes
+# 3. Busca de Redações
 redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
-lista_redacoes = [ {**r.to_dict(), 'id': r.id} for r in redacoes_ref ]
+lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
-if not lista_redacoes:
-    st.info("Nenhuma redação pendente por enquanto! ☕")
+if not lista:
+    st.info("Tudo corrigido por aqui! ☕")
 else:
-    opcoes = {f"{r.get('aluno_nome', 'Sem Nome')} - {r['tema']}": r for r in lista_redacoes}
-    escolha = st.selectbox("Selecione uma redação para corrigir:", list(opcoes.keys()))
-    redacao = opcoes[escolha]
+    escolha = st.selectbox("Selecione a redação:", [f"{r['aluno_nome']} - {r['tema']}" for r in lista])
+    redacao = next(r for r in lista if f"{r['aluno_nome']} - {r['tema']}" == escolha)
 
     col1, col2 = st.columns([2, 1])
-    canvas_result = None
 
     with col1:
         st.write("### 📝 Folha de Redação")
+        st.info("💡 Clique na imagem onde encontrar um erro para marcar um ponto.")
         
-        if redacao.get('tipo') == 'arquivo':
-            try:
-                # Localização e Download
-                url_full = redacao.get('url_arquivo', '')
-                nome_arquivo_storage = redacao.get('caminho_storage')
-                if not nome_arquivo_storage and url_full:
-                    bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
-                    nome_arquivo_storage = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
+        # Download da Imagem
+        blob = bucket.blob(redacao['caminho_storage'])
+        img_bytes = blob.download_as_bytes()
+        img = Image.open(BytesIO(img_bytes))
+        
+        # Desenhar os pontos já marcados na imagem para o professor ver
+        draw = ImageDraw.Draw(img)
+        for p in st.session_state.pontos_correcao:
+            coords = [p['x']-10, p['y']-10, p['x']+10, p['y']+10]
+            draw.ellipse(coords, fill="red", outline="white")
 
-                blob = bucket.blob(nome_arquivo_storage)
-                conteudo_bytes = blob.download_as_bytes()
-                
-                # Processamento da Imagem
-                img_original = Image.open(BytesIO(conteudo_bytes))
-                largura_display = 800
-                w, h = img_original.size
-                altura_display = int(largura_display * (h / w))
-                img_redimensionada = img_original.resize((largura_display, altura_display))
-                
-                # Conversão para Base64
-                imagem_b64 = converter_imagem_para_base64(img_redimensionada)
-                
-                comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
-                cor_pincel = COMPETENCIAS[comp_selecionada]
+        # O componente de coordenadas (Substitui o Canvas)
+        # Ele retorna exatamente onde o professor clicou
+        value = streamlit_image_coordinates(img, key="coords_redacao")
 
-                # O Canvas com a imagem injetada
-                canvas_result = st_canvas(
-                    fill_color=cor_pincel,
-                    stroke_width=1,
-                    stroke_color="#000",
-                    background_image=imagem_b64, 
-                    update_streamlit=True,
-                    height=altura_display,
-                    width=largura_display,
-                    drawing_mode="rect",
-                    key="canvas_integrado_v1",
-                )
-                
-                st.info("💡 Desenhe os retângulos diretamente sobre a redação.")
-
-            except Exception as e:
-                st.error(f"Erro ao carregar folha: {e}")
-        else:
-            st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
+        if value:
+            novo_ponto = {"x": value["x"], "y": value["y"]}
+            if novo_ponto not in [p for p in st.session_state.pontos_correcao]:
+                st.session_state.pontos_correcao.append(novo_ponto)
+                st.rerun()
 
     with col2:
-        st.write("### 📊 Notas e Comentários")
-        with st.form("form_correcao"):
-            n1 = st.slider("C1", 0, 200, 0, 40); n2 = st.slider("C2", 0, 200, 0, 40)
-            n3 = st.slider("C3", 0, 200, 0, 40); n4 = st.slider("C4", 0, 200, 0, 40)
-            n5 = st.slider("C5", 0, 200, 0, 40)
+        st.write("### 📊 Notas e Feedback")
+        with st.form("form_final"):
+            n1 = st.number_input("C1", 0, 200, 160, 40)
+            n2 = st.number_input("C2", 0, 200, 160, 40)
             
-            comentarios_caixinhas = []
-            if canvas_result and canvas_result.json_data:
-                objetos = canvas_result.json_data["objects"]
-                for i, obj in enumerate(objetos):
-                    comentario = st.text_input(f"Destaque {i+1}", key=f"c_{i}")
-                    comentarios_caixinhas.append({
-                        "id_caixa": i, "comentario": comentario,
-                        "posicao": {"left": obj['left'], "top": obj['top'], "color": obj['fill']}
-                    })
-
-            feedback = st.text_area("Feedback Geral:", height=150)
-
-            if st.form_submit_button("Finalizar Correção", type="primary"):
+            # Gerar campos de texto dinâmicos para cada ponto clicado
+            comentarios = []
+            for i, ponto in enumerate(st.session_state.pontos_correcao):
+                txt = st.text_input(f"Erro no ponto {i+1} (x:{ponto['x']})", key=f"txt_{i}")
+                comentarios.append({"posicao": ponto, "texto": txt})
+            
+            feedback = st.text_area("Feedback Geral")
+            
+            if st.form_submit_button("Enviar Correção"):
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
-                    "notas": [n1, n2, n3, n4, n5],
-                    "nota_final": n1+n2+n3+n4+n5,
-                    "feedback_geral": feedback,
-                    "anotacoes_detalhadas": comentarios_caixinhas,
-                    "data_correcao": firestore.SERVER_TIMESTAMP
+                    "anotacoes": comentarios,
+                    "nota_final": n1+n2,
+                    "feedback": feedback
                 })
-                st.success("✅ Sucesso!")
+                st.session_state.pontos_correcao = []
+                st.success("Enviado!")
                 time.sleep(1); st.rerun()
+
+        if st.button("Limpar Marcas"):
+            st.session_state.pontos_correcao = []
+            st.rerun()
