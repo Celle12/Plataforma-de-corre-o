@@ -23,7 +23,7 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 3. Estilização
+# 3. Estilização das Competências
 COMPETENCIAS = {
     "C1 - Gramática": "#0000FF33", "C2 - Repertório": "#00FF0033",
     "C3 - Argumentação": "#FFFF0033", "C4 - Coesão": "#FFA50033", "C5 - Proposta": "#FF000033"
@@ -77,26 +77,28 @@ else:
 
                     st.info("💡 Desenhe sobre os erros.")
 
-                    # --- O TRUQUE DE MESTRE (CSS) ---
-                    # Este código impede que a imagem seja arrastada e garante o alinhamento
+                    # --- CSS CIRÚRGICO (Evita tela branca e trava de scroll) ---
                     st.markdown(f"""
                         <style>
-                        .stImage img {{
+                        /* Bloqueia o drag da imagem para evitar o 'fantasma' */
+                        div[data-testid="stImage"] img {{
                             user-select: none;
                             -webkit-user-drag: none;
                             pointer-events: none;
                         }}
-                        /* Tenta sobrepor o canvas milimetricamente */
-                        [data-testid="stVerticalBlock"] > div:nth-child(2) {{
+                        /* Puxa APENAS o Iframe do canvas para cima da imagem */
+                        iframe[title="streamlit_drawable_canvas.st_canvas"] {{
                             margin-top: -{altura_alvo + 45}px;
+                            position: relative;
+                            z-index: 10;
                         }}
                         </style>
                     """, unsafe_allow_html=True)
 
-                    # 1. Exibe a imagem de fundo (agora protegida pelo CSS)
+                    # 1. Mostramos a imagem
                     st.image(img_original, width=largura_alvo)
                     
-                    # 2. Canvas Transparente por cima
+                    # 2. O Canvas aparece logo abaixo, mas o CSS acima o "puxa" para cima da foto
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
@@ -106,7 +108,7 @@ else:
                         height=altura_alvo,
                         width=largura_alvo,
                         drawing_mode="rect",
-                        key="canvas_transparente_v2",
+                        key="canvas_corretor_v4",
                     )
             except Exception as e:
                 st.error(f"Erro ao carregar: {e}")
@@ -116,9 +118,13 @@ else:
     with col2:
         st.write("### 📊 Notas e Comentários")
         with st.form("form_correcao"):
-            n1 = st.slider("C1", 0, 200, 0, 40); n2 = st.slider("C2", 0, 200, 0, 40)
-            n3 = st.slider("C3", 0, 200, 0, 40); n4 = st.slider("C4", 0, 200, 0, 40)
-            n5 = st.slider("C5", 0, 200, 0, 40)
+            n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
+            n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
+            n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
+            n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
+            n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
+            
+            st.divider()
             
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
@@ -130,9 +136,9 @@ else:
                         "posicao": {"left": obj['left'], "top": obj['top'], "color": obj['fill']}
                     })
 
-            feedback = st.text_area("Feedback Geral:", height=100)
+            feedback = st.text_area("Feedback Geral:", height=150)
 
-            if st.form_submit_button("Enviar Correção", type="primary"):
+            if st.form_submit_button("Finalizar e Enviar", type="primary"):
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "notas": [n1, n2, n3, n4, n5],
@@ -141,5 +147,5 @@ else:
                     "anotacoes_detalhadas": comentarios_caixinhas,
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
-                st.success("✅ Sucesso!")
+                st.success("✅ Correção enviada!")
                 time.sleep(1); st.rerun()
