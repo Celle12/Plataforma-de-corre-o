@@ -4,7 +4,7 @@ import time
 import requests
 from io import BytesIO
 from PIL import Image
-from google.cloud import firestore, storage
+from google.cloud import firestore, storage 
 from google.oauth2 import service_account
 from streamlit_drawable_canvas import st_canvas
 from urllib.parse import unquote
@@ -18,7 +18,10 @@ def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
     credenciais = service_account.Credentials.from_service_account_info(info_chave)
     
+    # Cliente do Banco de Dados
     db = firestore.Client(credentials=credenciais, project=info_chave['project_id'])
+    
+    # Cliente do Storage
     storage_client = storage.Client(credentials=credenciais, project=info_chave['project_id'])
     bucket = storage_client.bucket("plataforma-redacao-de0f3.firebasestorage.app")
     
@@ -26,7 +29,7 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 3. Estilização das Competências
+# 3. Estilização das Competências e Cores
 COMPETENCIAS = {
     "C1 - Gramática": "#0000FF33",  # Azul
     "C2 - Repertório": "#00FF0033", # Verde
@@ -35,6 +38,7 @@ COMPETENCIAS = {
     "C5 - Proposta": "#FF000033"   # Vermelho
 }
 
+# --- TELA PRINCIPAL ---
 st.title("⚖️ Painel de Correção Profissional")
 
 # 4. Listagem de Redações Pendentes
@@ -50,46 +54,57 @@ for r in redacoes_ref:
 if not lista_redacoes:
     st.info("Nenhuma redação pendente por enquanto! ☕")
 else:
+    # Seleção por Nome do Aluno
     opcoes = {f"{r.get('aluno_nome', 'Sem Nome')} - {r['tema']}": r for r in lista_redacoes}
     escolha = st.selectbox("Selecione uma redação para corrigir:", list(opcoes.keys()))
     redacao = opcoes[escolha]
 
     col1, col2 = st.columns([2, 1])
-    canvas_result = None
+    canvas_result = None 
 
     with col1:
         st.write("### 📝 Folha de Redação")
         
         if redacao.get('tipo') == 'arquivo':
             try:
+                url_full = redacao.get('url_arquivo', '')
+                nome_arquivo_storage = None
+
                 # ESTRATÉGIA DE BUSCA DO ARQUIVO
-                # 1. Tenta pelo caminho direto (novo método do App Aluno)
-                nome_arquivo_storage = redacao.get('caminho_storage')
+                # 1. Tenta pelo campo novo (caminho_storage)
+                if redacao.get('caminho_storage'):
+                    nome_arquivo_storage = redacao.get('caminho_storage')
                 
-                # 2. Se não existir (redação antiga), tenta extrair da URL com segurança
-                if not nome_arquivo_storage:
-                    url_full = redacao.get('url_arquivo', '')
-                    if "/o/" in url_full:
+                # 2. Caso de Fallback (Redações antigas ou links diretos do Google)
+                elif url_full:
+                    bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
+                    if bucket_name in url_full:
+                        # Extrai o caminho após o nome do bucket na URL
+                        nome_arquivo_storage = url_full.split(bucket_name + "/")[-1].split("?")[0]
+                        nome_arquivo_storage = unquote(nome_arquivo_storage) # Corrige @ e /
+                    elif "/o/" in url_full:
+                        # Formato padrão do Firebase Storage
                         caminho_codificado = url_full.split("/o/")[1].split("?")[0]
                         nome_arquivo_storage = unquote(caminho_codificado)
-                    else:
-                        raise Exception("Não foi possível localizar o caminho do arquivo.")
 
-                # Busca o arquivo no Storage
+                if not nome_arquivo_storage:
+                    raise Exception("Não foi possível localizar o caminho do arquivo.")
+
+                # Busca o arquivo real no Storage
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_arquivo = blob.download_as_bytes()
                 
                 # VERIFICAÇÃO DE PDF
                 if nome_arquivo_storage.lower().endswith(".pdf"):
-                    st.warning("⚠️ Esta redação é um PDF. O sistema de 'caixinhas' funciona apenas em fotos.")
-                    st.download_button("📥 Baixar PDF para Corrigir", conteudo_arquivo, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
+                    st.warning("⚠️ Esta redação é um PDF. Use o botão abaixo para baixar e corrigir.")
+                    st.download_button("📥 Baixar PDF", conteudo_arquivo, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
                 else:
                     img = Image.open(BytesIO(conteudo_arquivo))
                     
                     comp_selecionada = st.radio("Selecione a competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
-                    st.info("💡 Desenhe sobre os erros. Cada retângulo aparecerá na lista à direita para comentar.")
+                    st.info("💡 Desenhe retângulos sobre os trechos na imagem.")
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
@@ -110,6 +125,7 @@ else:
         st.write("### 📊 Notas e Comentários")
         
         with st.form("form_correcao"):
+            # 1. Notas das 5 Competências
             n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
             n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
             n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
@@ -118,6 +134,7 @@ else:
             
             st.divider()
             
+            # 2. Comentários por Destaque Visual
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
                 objetos = canvas_result.json_data["objects"]
@@ -125,7 +142,7 @@ else:
                     st.write("#### 💬 Comentários nos destaques:")
                     for i, obj in enumerate(objetos):
                         cor_hex = obj['fill']
-                        comentario = st.text_input(f"Destaque {i+1} ({cor_hex})", key=f"coment_{i}")
+                        comentario = st.text_input(f"Destaque {i+1}", key=f"coment_{i}")
                         comentarios_caixinhas.append({
                             "id_caixa": i,
                             "comentario": comentario,
@@ -144,6 +161,7 @@ else:
             if st.form_submit_button("Finalizar e Enviar", type="primary"):
                 nota_total = n1 + n2 + n3 + n4 + n5
                 
+                # Salva a correção no Firestore
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "notas": [n1, n2, n3, n4, n5],
