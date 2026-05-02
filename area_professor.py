@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import time
-import base64  # Importante para converter a imagem
+import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
@@ -12,10 +12,10 @@ from urllib.parse import unquote
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
-# Função auxiliar para converter imagem PIL para Base64 (Evita o erro de 'height' e 'image_to_url')
-def imagem_para_base64(img):
+# Função essencial para evitar o erro 'image_to_url'
+def converter_para_b64(img_pil):
     buffered = BytesIO()
-    img.save(buffered, format="PNG")
+    img_pil.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
 
@@ -69,83 +69,62 @@ else:
         
         if redacao.get('tipo') == 'arquivo':
             try:
-                url_original = redacao.get('url_arquivo', '')
-                nome_arquivo_storage = None
+                # Localização do arquivo
+                url_full = redacao.get('url_arquivo', '')
+                nome_arquivo_storage = redacao.get('caminho_storage')
 
-                # Busca do caminho do arquivo no Storage
-                if redacao.get('caminho_storage'):
-                    nome_arquivo_storage = redacao.get('caminho_storage')
-                elif url_original:
+                if not nome_arquivo_storage and url_full:
                     bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
-                    if bucket_name in url_original:
-                        nome_arquivo_storage = unquote(url_original.split(bucket_name + "/")[-1].split("?")[0])
-                    elif "/o/" in url_original:
-                        nome_arquivo_storage = unquote(url_original.split("/o/")[1].split("?")[0])
+                    if bucket_name in url_full:
+                        nome_arquivo_storage = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
+                    elif "/o/" in url_full:
+                        nome_arquivo_storage = unquote(url_full.split("/o/")[1].split("?")[0])
 
                 if not nome_arquivo_storage:
                     raise Exception("Caminho do arquivo não identificado.")
 
-                # Baixa o arquivo do Storage
+                # Download e Processamento
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_bytes = blob.download_as_bytes()
                 
                 if nome_arquivo_storage.lower().endswith(".pdf"):
                     st.warning("⚠️ Arquivo PDF detectado.")
-                    st.download_button("📥 Baixar PDF", conteudo_bytes, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
+                    st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
-                    # PROCESSO DE IMAGEM BLINDADO
                     imagem_pil = Image.open(BytesIO(conteudo_bytes))
                     
-                    # Calcula dimensões
-                    largura_alvo = 800
-                    largura_orig, altura_orig = imagem_pil.size
-                    altura_alvo = int(largura_alvo * (altura_orig / largura_orig))
+                    # Cálculo de dimensões reais
+                    largura_display = 800
+                    w, h = imagem_pil.size
+                    altura_display = int(largura_display * (h / w))
                     
-                    # Transforma em Base64 para o Canvas não quebrar
-                    imagem_b64 = imagem_para_base64(imagem_pil)
+                    # A MÁGICA: Transformamos em Base64 antes de enviar para o Canvas
+                    imagem_final_b64 = converter_para_b64(imagem_pil)
                     
-                    comp_selecionada = st.radio("Selecione a competência:", list(COMPETENCIAS.keys()), horizontal=True)
+                    comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
                     st.info("💡 Desenhe retângulos sobre os erros.")
                     
+                    # Agora passamos a string Base64. Isso pula a função problemática do Streamlit.
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_image=imagem_pil, # Passamos o objeto PIL
+                        background_image=imagem_final_b64, 
                         update_streamlit=True,
-                        height=altura_alvo,
-                        width=largura_alvo,
+                        height=altura_display,
+                        width=largura_display,
                         drawing_mode="rect",
-                        key="canvas_corretor",
+                        key="canvas_corretor_v3",
                     )
             except Exception as e:
-                # Se o erro do PIL persistir, usamos a URL como última alternativa
-                if "image_to_url" in str(e) or "height" in str(e):
-                    try:
-                        st.warning("Usando modo de compatibilidade para exibição.")
-                        canvas_result = st_canvas(
-                            fill_color=cor_pincel,
-                            stroke_width=1,
-                            stroke_color="#000",
-                            background_image=url_original, 
-                            update_streamlit=True,
-                            height=800, # Altura fixa para evitar erro de 'str'
-                            width=800,
-                            drawing_mode="rect",
-                            key="canvas_corretor_compat",
-                        )
-                    except:
-                        st.error(f"Erro crítico ao carregar imagem: {e}")
-                else:
-                    st.error(f"Erro ao carregar o arquivo: {e}")
+                st.error(f"Erro crítico ao carregar imagem: {e}")
         else:
             st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
 
     with col2:
         st.write("### 📊 Notas e Comentários")
-        
         with st.form("form_correcao"):
             n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
             n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
@@ -164,14 +143,10 @@ else:
                         cor_hex = obj['fill']
                         comentario = st.text_input(f"Destaque {i+1}", key=f"coment_{i}")
                         comentarios_caixinhas.append({
-                            "id_caixa": i,
-                            "comentario": comentario,
+                            "id_caixa": i, "comentario": comentario,
                             "posicao": {
-                                "left": obj['left'],
-                                "top": obj['top'],
-                                "width": obj['width'],
-                                "height": obj['height'],
-                                "color": cor_hex
+                                "left": obj['left'], "top": obj['top'],
+                                "width": obj['width'], "height": obj['height'], "color": cor_hex
                             }
                         })
 
@@ -179,11 +154,10 @@ else:
             feedback_geral = st.text_area("Feedback Geral Final:", height=150)
 
             if st.form_submit_button("Finalizar e Enviar", type="primary"):
-                nota_total = n1 + n2 + n3 + n4 + n5
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "notas": [n1, n2, n3, n4, n5],
-                    "nota_final": nota_total,
+                    "nota_final": n1+n2+n3+n4+n5,
                     "feedback_geral": feedback_geral,
                     "anotacoes_detalhadas": comentarios_caixinhas,
                     "data_correcao": firestore.SERVER_TIMESTAMP
