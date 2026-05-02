@@ -7,6 +7,7 @@ from PIL import Image
 from google.cloud import firestore, storage  # Adicionado storage
 from google.oauth2 import service_account
 from streamlit_drawable_canvas import st_canvas
+from urllib.parse import unquote
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
@@ -67,18 +68,16 @@ else:
             url_full = redacao['url_arquivo']
             
             try:
-                # TENTA IDENTIFICAR O NOME DO ARQUIVO DE DOIS JEITOS DIFERENTES
-                if "/o/" in url_full:
-                    # Formato Firebase: .../o/nome%2Farquivo?alt...
-                    nome_arquivo_storage = url_full.split("/o/")[1].split("?")[0].replace("%2F", "/").replace("%40", "@")
-                else:
-                    # Formato Google Cloud: .../bucket/nome/arquivo
-                    # Pega tudo que vem depois do nome do seu bucket
-                    nome_arquivo_storage = url_full.split(bucket.name + "/")[-1]
+                # 1. Pega tudo que está entre '/o/' e '?'
+                caminho_codificado = url_full.split("/o/")[1].split("?")[0]
+                
+                # 2. O 'unquote' resolve o %2F virando / e o %40 virando @ de uma vez só!
+                nome_arquivo_storage = unquote(caminho_codificado)
 
-                # Agora o código segue igual...
+                # 3. Agora busca o arquivo real
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_arquivo = blob.download_as_bytes()
+                
                 
                 # (O restante do código de verificação de PDF e Canvas continua o mesmo daqui para baixo)
                 blob = bucket.blob(nome_arquivo_storage)
