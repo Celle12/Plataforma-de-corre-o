@@ -11,7 +11,7 @@ from urllib.parse import unquote
 # 1. Configuração da Página
 st.set_page_config(page_title="Área do Aluno - Redação", page_icon="📝", layout="wide")
 
-# 2. Configuração do Firebase
+# 2. Configuração do Firebase (databaseURL ADICIONADA)
 firebaseConfig = {
   "apiKey": "AIzaSyBBxjGQkN_b-keKwXw9KQq-W8l76D6C2zA",
   "authDomain": "plataforma-redacao-de0f3.firebaseapp.com",
@@ -19,6 +19,7 @@ firebaseConfig = {
   "storageBucket": "plataforma-redacao-de0f3.firebasestorage.app",
   "messagingSenderId": "105466681652",
   "appId": "1:105466681652:web:13438e4cbd600a1c3a2d61",
+  "databaseURL": "" # Esta linha resolve o KeyError do print
 }
 
 @st.cache_resource
@@ -42,28 +43,36 @@ if 'email_usuario' not in st.session_state:
 if 'nome_usuario' not in st.session_state:
     st.session_state.nome_usuario = ""
 
-# --- LÓGICA DE LOGIN (CORRIGIDA PARA 1 CLIQUE) ---
+# --- LÓGICA DE ACESSO (SEM st.form PARA EVITAR CLIQUE DUPLO) ---
 if not st.session_state.logado:
     st.title("🔐 Acesso à Plataforma")
     aba1, aba2 = st.tabs(["Login", "Cadastrar"])
     
     with aba1:
-        # Removido o form para evitar o erro de duplo clique no login
-        email_input = st.text_input("E-mail", key="login_email")
-        senha_input = st.text_input("Senha", type="password", key="login_senha")
-        if st.button("Entrar", type="primary"):
-            try:
-                user = auth.sign_in_with_email_and_password(email_input, senha_input)
-                doc_ref = db.collection("usuarios").document(email_input).get()
-                st.session_state.nome_usuario = doc_ref.to_dict().get("nome") if doc_ref.exists else email_input
-                st.session_state.email_usuario = email_input
-                st.session_state.logado = True
-                st.rerun() # Rerun imediato
-            except:
-                st.error("E-mail ou senha incorretos.")
+        # Campos fora de formulário respondem melhor ao primeiro clique
+        email_input = st.text_input("E-mail", key="login_email_final")
+        senha_input = st.text_input("Senha", type="password", key="login_senha_final")
+        
+        if st.button("Entrar", type="primary", key="btn_entrar"):
+            if email_input and senha_input:
+                try:
+                    user = auth.sign_in_with_email_and_password(email_input, senha_input)
+                    
+                    # Busca dados do usuário
+                    doc = db.collection("usuarios").document(email_input).get()
+                    st.session_state.nome_usuario = doc.to_dict().get("nome") if doc.exists else email_input
+                    st.session_state.email_usuario = email_input
+                    st.session_state.logado = True
+                    
+                    # Força a atualização para entrar no painel
+                    st.rerun()
+                except Exception as e:
+                    st.error("E-mail ou senha incorretos.")
+            else:
+                st.warning("Preencha todos os campos.")
     
     with aba2:
-        with st.form("signup_form"):
+        with st.form("signup_form_final"):
             nome_completo = st.text_input("Nome Completo")
             email_novo = st.text_input("Novo E-mail")
             senha_nova = st.text_input("Nova Senha", type="password")
@@ -71,10 +80,15 @@ if not st.session_state.logado:
                 if nome_completo and email_novo and senha_nova:
                     try:
                         auth.create_user_with_email_and_password(email_novo, senha_nova)
-                        db.collection("usuarios").document(email_novo).set({"nome": nome_completo, "email": email_novo})
-                        st.success("Conta criada! Faça login ao lado.")
+                        db.collection("usuarios").document(email_novo).set({
+                            "nome": nome_completo, 
+                            "email": email_novo
+                        })
+                        st.success("Conta criada! Agora faça login na aba ao lado.")
                     except:
                         st.error("Erro ao criar conta.")
+
+# --- O RESTANTE DO CÓDIGO (ÁREA LOGADA) CONTINUA IGUAL ---
 
 # --- ÁREA LOGADA ---
 else:
