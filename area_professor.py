@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import json
 import time
 from io import BytesIO
@@ -22,7 +23,7 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 2. Estado da Sessão (Ajustado com trava de clique)
+# 2. Estado da Sessão
 if "pontos_correcao" not in st.session_state:
     st.session_state.pontos_correcao = []
 if "ponto_para_comentar" not in st.session_state:
@@ -50,13 +51,25 @@ def modal_comentario(index):
 tab_correcao, tab_temas = st.tabs(["🖋️ Corrigir Redações", "📋 Gerenciar Temas"])
 
 with tab_correcao:
-    st.title("⚖️ Sistema de Correção")
-    
-    # Verifica se deve abrir o modal
+    # --- HACK DE JAVASCRIPT PARA MANTER O TOPO ---
+    # Isso impede que o app "pule" para o rodapé após fechar o pop-up
+    components.html(
+        """
+        <script>
+        var mainSection = window.parent.document.querySelector('section.main');
+        if (mainSection) {
+            mainSection.scrollTo({ top: 0, behavior: 'instant' });
+        }
+        </script>
+        """,
+        height=0,
+    )
+
     if st.session_state.ponto_para_comentar is not None:
         modal_comentario(st.session_state.ponto_para_comentar)
 
-    # Busca de Redações
+    st.title("⚖️ Sistema de Correção")
+    
     redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
     lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
@@ -89,13 +102,10 @@ with tab_correcao:
                     draw.ellipse([x-r, y-r, x+r, y+r], fill="red", outline="white", width=3)
                     draw.text((x-4, y-6), str(i+1), fill="white")
 
-                # CAPTURA DO CLIQUE COM TRAVA DE SEGURANÇA
-                value = streamlit_image_coordinates(img_edit, key="editor_final_v10")
+                value = streamlit_image_coordinates(img_edit, key="editor_v11")
 
-                # Só entra se houver clique E for um clique diferente do último registrado
                 if value and value != st.session_state.ultimo_clique:
-                    st.session_state.ultimo_clique = value # Registra este clique como o último
-                    
+                    st.session_state.ultimo_clique = value
                     novo_p = {"x": value["x"], "y": value["y"], "texto": ""}
                     st.session_state.pontos_correcao.append(novo_p)
                     st.session_state.ponto_para_comentar = len(st.session_state.pontos_correcao) - 1
@@ -124,7 +134,6 @@ with tab_correcao:
             st.write("#### 💬 Comentários Adicionados")
             lista_final = []
             for i, p in enumerate(st.session_state.pontos_correcao):
-                # O value puxa o que foi salvo no modal
                 txt = st.text_input(f"Erro {i+1}", value=p.get('texto', ""), key=f"f_input_{i}")
                 lista_final.append({"x": p['x'], "y": p['y'], "texto": txt})
 
