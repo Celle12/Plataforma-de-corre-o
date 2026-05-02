@@ -1,17 +1,35 @@
 import streamlit as st
 import json
 import time
+import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
 from google.oauth2 import service_account
-from streamlit_drawable_canvas import st_canvas
 from urllib.parse import unquote
 
-# 1. Configuração da Página
+# --- 1. A VACINA DEFINITIVA (Compatibilidade) ---
+# Isso resolve o erro 'image_to_url' sem precisar de CSS complexo
+import streamlit.elements.image as st_image
+
+def vacina_image_to_url(image, width, height, clamp, channels, output_format, image_id):
+    if isinstance(image, str):
+        return image
+    buffered = BytesIO()
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
+st_image.image_to_url = vacina_image_to_url
+
+# Agora importamos o canvas após a vacina estar aplicada
+from streamlit_drawable_canvas import st_canvas
+
+# --- 2. CONFIGURAÇÕES ---
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
-# 2. Conexão com Firestore e Storage
 @st.cache_resource
 def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
@@ -23,7 +41,6 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 3. Estilização
 COMPETENCIAS = {
     "C1 - Gramática": "#0000FF33", "C2 - Repertório": "#00FF0033",
     "C3 - Argumentação": "#FFFF0033", "C4 - Coesão": "#FFA50033", "C5 - Proposta": "#FF000033"
@@ -31,7 +48,7 @@ COMPETENCIAS = {
 
 st.title("⚖️ Painel de Correção Profissional")
 
-# 4. Listagem de Redações Pendentes
+# --- 3. LISTAGEM ---
 redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
 lista_redacoes = [ {**r.to_dict(), 'id': r.id} for r in redacoes_ref ]
 
@@ -50,6 +67,7 @@ else:
         
         if redacao.get('tipo') == 'arquivo':
             try:
+                # Localização do arquivo no Storage
                 url_full = redacao.get('url_arquivo', '')
                 nome_arquivo_storage = redacao.get('caminho_storage')
 
@@ -67,80 +85,41 @@ else:
                     st.warning("⚠️ PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
-                    img_original = Image.open(BytesIO(conteudo_bytes))
+                    imagem_pil = Image.open(BytesIO(conteudo_bytes))
                     largura_alvo = 800
-                    w, h = img_original.size
+                    w, h = imagem_pil.size
                     altura_alvo = int(largura_alvo * (h / w))
                     
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
-                    st.info("💡 Desenhe sobre os erros.")
+                    st.info("💡 Desenhe retângulos sobre os erros na imagem.")
 
-                    # --- NOVO AJUSTE DE CAMADAS (CSS SEGURO) ---
-                    # Criamos um container relativo para que o absoluto funcione dentro dele
-                    st.markdown(f"""
-                        <style>
-                        /* Estiliza o container da imagem */
-                        .redacao-container {{
-                            position: relative;
-                            width: {largura_alvo}px;
-                            height: {altura_alvo}px;
-                        }}
-                        /* Trava a imagem no fundo */
-                        .redacao-container img {{
-                            position: absolute;
-                            top: 0;
-                            left: 0;
-                            z-index: 1;
-                            user-select: none;
-                            -webkit-user-drag: none;
-                        }}
-                        /* Coloca o canvas por cima sem margens negativas loucas */
-                        .redacao-container .stCanvas {{
-                            position: absolute !important;
-                            top: 0;
-                            left: 0;
-                            z-index: 5;
-                        }}
-                        </style>
-                    """, unsafe_allow_html=True)
-
-                    # Abrimos o container manual
-                    st.markdown('<div class="redacao-container">', unsafe_allow_html=True)
-                    
-                    # 1. Imagem Base
-                    st.image(img_original, width=largura_alvo)
-                    
-                    # 2. Canvas Sobreposto
+                    # O Canvas Oficial agora funciona graças à vacina no topo do código
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_color="rgba(0, 0, 0, 0)", 
+                        background_image=imagem_pil, 
                         update_streamlit=True,
                         height=altura_alvo,
                         width=largura_alvo,
                         drawing_mode="rect",
-                        key="canvas_camada_final",
+                        key="canvas_corretor_final",
                     )
-                    
-                    # Fechamos o container manual
-                    st.markdown('</div>', unsafe_allow_html=True)
-
             except Exception as e:
-                st.error(f"Erro ao carregar: {e}")
+                st.error(f"Erro ao carregar folha: {e}")
         else:
             st.text_area("Texto:", redacao.get('texto'), height=500, disabled=True)
 
     with col2:
         st.write("### 📊 Notas e Comentários")
         with st.form("form_correcao"):
-            n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
-            n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
-            n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
-            n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
-            n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
+            n1 = st.slider("C1", 0, 200, 0, 40); n2 = st.slider("C2", 0, 200, 0, 40)
+            n3 = st.slider("C3", 0, 200, 0, 40); n4 = st.slider("C4", 0, 200, 0, 40)
+            n5 = st.slider("C5", 0, 200, 0, 40)
+            
+            st.divider()
             
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
