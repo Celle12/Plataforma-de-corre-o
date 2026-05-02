@@ -96,7 +96,10 @@ else:
     # --- TAB DE ENVIO ---
     with tab_envio:
         st.title("📝 Envio de Redação")
-        tema = st.selectbox("Selecione o tema:", ["Escolha...", "Impactos da IA", "Saúde Mental", "Escolaridades"])
+        temas_ref = db.collection("temas").stream()
+    lista_temas = [t.to_dict()['nome'] for t in temas_ref]
+    
+    tema = st.selectbox("Selecione o tema:", ["Escolha..."] + lista_temas)
         
         if tema != "Escolha...":
             metodo = st.radio("Formato:", ["Digitar Texto", "Anexar Arquivo"], horizontal=True)
