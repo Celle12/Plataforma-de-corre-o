@@ -2,7 +2,5 @@ streamlit
 Pillow
 google-cloud-firestore
 google-cloud-storage
-google-auth
-streamlit-drawable-canvas
+streamlit-image-coordinates
 pyrebase4
-requests
