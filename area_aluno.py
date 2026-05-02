@@ -118,20 +118,18 @@ else:
                     arquivo_upload = None
                 else:
                     texto_redacao = ""
-                    # AJUSTE: Adicionado 'pdf' à lista de tipos permitidos
-                    arquivo_upload = st.file_uploader("Selecione a foto ou PDF da sua redação", type=["png", "jpg", "jpeg", "pdf"])
+                    # RETIREI O PDF PARA EVITAR O ERRO NO PROFESSOR
+                    st.info("⚠️ Envie uma FOTO nítida da sua redação para permitir a correção detalhada.")
+                    arquivo_upload = st.file_uploader("Selecione a foto da sua redação (PNG, JPG)", type=["png", "jpg", "jpeg"])
 
                 if st.form_submit_button("Enviar para Correção", type="primary"):
                     if texto_redacao or arquivo_upload:
                         url_arquivo, nome_blob = "", ""
                         if arquivo_upload:
-                            # Lógica para tratar PDF ou Imagem no Storage
-                            ext = arquivo_upload.name.split('.')[-1].lower()
-                            c_type = "application/pdf" if ext == "pdf" else "image/jpeg"
-                            
-                            nome_blob = f"redacoes/{st.session_state.email_usuario}_{int(time.time())}.{ext}"
+                            # Tudo agora sobe garantidamente como imagem
+                            nome_blob = f"redacoes/{st.session_state.email_usuario}_{int(time.time())}.jpg"
                             blob = bucket.blob(nome_blob)
-                            blob.upload_from_file(arquivo_upload, content_type=c_type)
+                            blob.upload_from_file(arquivo_upload, content_type="image/jpeg")
                             url_arquivo = blob.public_url
                         
                         db.collection("redacoes").add({
@@ -171,16 +169,13 @@ else:
             elif r['status'] == "Negada":
                 st.error(f"❌ Problema: {r.get('motivo_negativa')}")
                 st.info(f"**Obs:** {r.get('obs_negativa')}")
-                # AJUSTE: Adicionado 'pdf' no reenvio também
-                novo_arq = st.file_uploader("Reenviar arquivo (Foto ou PDF):", type=["jpg", "png", "jpeg", "pdf"], key="reenvio")
+                # RETIREI O PDF AQUI TAMBÉM
+                novo_arq = st.file_uploader("Reenviar FOTO nítida:", type=["jpg", "png", "jpeg"], key="reenvio")
                 if st.button("Confirmar Reenvio"):
                     if novo_arq:
-                        ext = novo_arq.name.split('.')[-1].lower()
-                        c_type = "application/pdf" if ext == "pdf" else "image/jpeg"
-                        
-                        nome_blob = f"redacoes/{st.session_state.email_usuario}_RE_{int(time.time())}.{ext}"
+                        nome_blob = f"redacoes/{st.session_state.email_usuario}_RE_{int(time.time())}.jpg"
                         blob = bucket.blob(nome_blob)
-                        blob.upload_from_file(novo_arq, content_type=c_type)
+                        blob.upload_from_file(novo_arq, content_type="image/jpeg")
                         db.collection("redacoes").document(r['id']).update({
                             "url_arquivo": blob.public_url,
                             "caminho_storage": nome_blob,
@@ -208,42 +203,38 @@ else:
                             caminho = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
 
                     if caminho:
-                        if caminho.lower().endswith('.pdf'):
-                            st.info("📄 Redação enviada em PDF. Clique no link abaixo para visualizar.")
-                            st.markdown(f"[**👁️ Visualizar/Baixar sua Redação Enviada**]({r.get('url_arquivo')})")
-                        else:
-                            try:
-                                blob = bucket.blob(caminho)
-                                img_bytes = blob.download_as_bytes()
-                                img = Image.open(BytesIO(img_bytes)).convert("RGB")
-                                LARGURA = 1000
-                                ALTURA = int(LARGURA * (img.size[1] / img.size[0]))
-                                img = img.resize((LARGURA, ALTURA))
+                        try:
+                            blob = bucket.blob(caminho)
+                            img_bytes = blob.download_as_bytes()
+                            img = Image.open(BytesIO(img_bytes)).convert("RGB")
+                            LARGURA = 1000
+                            ALTURA = int(LARGURA * (img.size[1] / img.size[0]))
+                            img = img.resize((LARGURA, ALTURA))
 
-                                fig = go.Figure()
-                                fig.add_layout_image(
-                                    dict(source=img, xref="x", yref="y", x=0, y=0, sizex=LARGURA, sizey=ALTURA, sizing="stretch", opacity=1, layer="below")
-                                )
-                                fig.update_xaxes(visible=False, range=[0, LARGURA])
-                                fig.update_yaxes(visible=False, range=[ALTURA, 0], scaleanchor="x", scaleratio=1)
+                            fig = go.Figure()
+                            fig.add_layout_image(
+                                dict(source=img, xref="x", yref="y", x=0, y=0, sizex=LARGURA, sizey=ALTURA, sizing="stretch", opacity=1, layer="below")
+                            )
+                            fig.update_xaxes(visible=False, range=[0, LARGURA])
+                            fig.update_yaxes(visible=False, range=[ALTURA, 0], scaleanchor="x", scaleratio=1)
 
-                                anotacoes = r.get('anotacoes_detalhadas', [])
-                                if anotacoes:
-                                    xs = [a['x'] for a in anotacoes]
-                                    ys = [a['y'] for a in anotacoes]
-                                    numeros = [str(i+1) for i in range(len(anotacoes))]
-                                    textos_hover = [f"<b>Erro {i+1}</b><br>{a['texto']}" for i, a in enumerate(anotacoes)]
-                                    fig.add_trace(go.Scatter(
-                                        x=xs, y=ys, mode='markers+text', text=numeros,
-                                        textposition="middle center",
-                                        textfont=dict(color='white', size=14, family="Arial Black"),
-                                        marker=dict(size=26, color='rgba(255, 0, 0, 0.9)', line=dict(color='white', width=3)),
-                                        hovertext=textos_hover, hoverinfo="text", showlegend=False
-                                    ))
-                                fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=ALTURA, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="closest")
-                                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                            except Exception as e:
-                                st.error(f"Erro ao carregar a imagem interativa: {e}")
+                            anotacoes = r.get('anotacoes_detalhadas', [])
+                            if anotacoes:
+                                xs = [a['x'] for a in anotacoes]
+                                ys = [a['y'] for a in anotacoes]
+                                numeros = [str(i+1) for i in range(len(anotacoes))]
+                                textos_hover = [f"<b>Erro {i+1}</b><br>{a['texto']}" for i, a in enumerate(anotacoes)]
+                                fig.add_trace(go.Scatter(
+                                    x=xs, y=ys, mode='markers+text', text=numeros,
+                                    textposition="middle center",
+                                    textfont=dict(color='white', size=14, family="Arial Black"),
+                                    marker=dict(size=26, color='rgba(255, 0, 0, 0.9)', line=dict(color='white', width=3)),
+                                    hovertext=textos_hover, hoverinfo="text", showlegend=False
+                                ))
+                            fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=ALTURA, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="closest")
+                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                        except Exception as e:
+                            st.error(f"Erro ao carregar a imagem interativa: {e}")
                     else:
                         st.info("Enviada como texto.")
                         st.text_area("Texto enviado:", r.get('texto'), height=300, disabled=True)
