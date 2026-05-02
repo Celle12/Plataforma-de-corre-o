@@ -61,49 +61,50 @@ else:
         
         if redacao.get('tipo') == 'arquivo':
             try:
-                url_full = redacao.get('url_arquivo', '')
+                url_da_imagem = redacao.get('url_arquivo', '')
                 nome_arquivo_storage = None
 
-                # Busca do caminho do arquivo
+                # Busca do caminho do arquivo no Storage
                 if redacao.get('caminho_storage'):
                     nome_arquivo_storage = redacao.get('caminho_storage')
-                elif url_full:
+                elif url_da_imagem:
                     bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
-                    if bucket_name in url_full:
-                        nome_arquivo_storage = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
-                    elif "/o/" in url_full:
-                        nome_arquivo_storage = unquote(url_full.split("/o/")[1].split("?")[0])
+                    if bucket_name in url_da_imagem:
+                        nome_arquivo_storage = unquote(url_da_imagem.split(bucket_name + "/")[-1].split("?")[0])
+                    elif "/o/" in url_da_imagem:
+                        nome_arquivo_storage = unquote(url_da_imagem.split("/o/")[1].split("?")[0])
 
                 if not nome_arquivo_storage:
                     raise Exception("Caminho do arquivo não identificado.")
 
+                # Baixa a imagem real para calcular as dimensões
                 blob = bucket.blob(nome_arquivo_storage)
-                conteudo_arquivo = blob.download_as_bytes()
+                conteudo_bruto = blob.download_as_bytes()
                 
                 if nome_arquivo_storage.lower().endswith(".pdf"):
                     st.warning("⚠️ Arquivo PDF detectado.")
-                    st.download_button("📥 Baixar PDF", conteudo_arquivo, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
+                    st.download_button("📥 Baixar PDF", conteudo_bruto, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
                 else:
-                    # Abrimos a imagem apenas para pegar as dimensões (Width/Height)
-                    img_temp = Image.open(BytesIO(conteudo_arquivo))
-                    largura_display = 800
-                    proporcao = img_temp.height / img_temp.width
-                    altura_display = int(largura_display * proporcao)
+                    # USAMOS A IMAGEM REAL AQUI (Apenas para medir)
+                    imagem_para_medir = Image.open(BytesIO(conteudo_bruto))
+                    largura_tela = 800
+                    proporcao = imagem_para_medir.height / imagem_para_medir.width
+                    altura_tela = int(largura_tela * proporcao)
                     
                     comp_selecionada = st.radio("Selecione a competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
-                    st.info("💡 Desenhe sobre os erros na imagem.")
+                    st.info("💡 Desenhe retângulos sobre os erros.")
                     
-                    # ALTERAÇÃO AQUI: Passamos a URL em vez do objeto PIL para evitar o erro image_to_url
+                    # NO CANVAS USAMOS A URL (Texto) PARA O FUNDO
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_image=url_full, 
+                        background_image=url_da_imagem, 
                         update_streamlit=True,
-                        height=altura_display,
-                        width=largura_display,
+                        height=altura_tela,
+                        width=largura_tela,
                         drawing_mode="rect",
                         key="canvas_corretor",
                     )
