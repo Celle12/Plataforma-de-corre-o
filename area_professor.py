@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import time
+import base64  # Importante para converter a imagem
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
@@ -10,6 +11,13 @@ from urllib.parse import unquote
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
+
+# Função auxiliar para converter imagem PIL para Base64 (Evita o erro de 'height' e 'image_to_url')
+def imagem_para_base64(img):
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 # 2. Conexão com Firestore e Storage
 @st.cache_resource
@@ -61,55 +69,77 @@ else:
         
         if redacao.get('tipo') == 'arquivo':
             try:
-                url_da_imagem = redacao.get('url_arquivo', '')
+                url_original = redacao.get('url_arquivo', '')
                 nome_arquivo_storage = None
 
                 # Busca do caminho do arquivo no Storage
                 if redacao.get('caminho_storage'):
                     nome_arquivo_storage = redacao.get('caminho_storage')
-                elif url_da_imagem:
+                elif url_original:
                     bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
-                    if bucket_name in url_da_imagem:
-                        nome_arquivo_storage = unquote(url_da_imagem.split(bucket_name + "/")[-1].split("?")[0])
-                    elif "/o/" in url_da_imagem:
-                        nome_arquivo_storage = unquote(url_da_imagem.split("/o/")[1].split("?")[0])
+                    if bucket_name in url_original:
+                        nome_arquivo_storage = unquote(url_original.split(bucket_name + "/")[-1].split("?")[0])
+                    elif "/o/" in url_original:
+                        nome_arquivo_storage = unquote(url_original.split("/o/")[1].split("?")[0])
 
                 if not nome_arquivo_storage:
                     raise Exception("Caminho do arquivo não identificado.")
 
-                # Baixa a imagem real para calcular as dimensões
+                # Baixa o arquivo do Storage
                 blob = bucket.blob(nome_arquivo_storage)
-                conteudo_bruto = blob.download_as_bytes()
+                conteudo_bytes = blob.download_as_bytes()
                 
                 if nome_arquivo_storage.lower().endswith(".pdf"):
                     st.warning("⚠️ Arquivo PDF detectado.")
-                    st.download_button("📥 Baixar PDF", conteudo_bruto, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
+                    st.download_button("📥 Baixar PDF", conteudo_bytes, file_name=f"redacao_{redacao.get('aluno_nome')}.pdf")
                 else:
-                    # USAMOS A IMAGEM REAL AQUI (Apenas para medir)
-                    imagem_para_medir = Image.open(BytesIO(conteudo_bruto))
-                    largura_tela = 800
-                    proporcao = imagem_para_medir.height / imagem_para_medir.width
-                    altura_tela = int(largura_tela * proporcao)
+                    # PROCESSO DE IMAGEM BLINDADO
+                    imagem_pil = Image.open(BytesIO(conteudo_bytes))
+                    
+                    # Calcula dimensões
+                    largura_alvo = 800
+                    largura_orig, altura_orig = imagem_pil.size
+                    altura_alvo = int(largura_alvo * (altura_orig / largura_orig))
+                    
+                    # Transforma em Base64 para o Canvas não quebrar
+                    imagem_b64 = imagem_para_base64(imagem_pil)
                     
                     comp_selecionada = st.radio("Selecione a competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
                     st.info("💡 Desenhe retângulos sobre os erros.")
                     
-                    # NO CANVAS USAMOS A URL (Texto) PARA O FUNDO
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_image=url_da_imagem, 
+                        background_image=imagem_pil, # Passamos o objeto PIL
                         update_streamlit=True,
-                        height=altura_tela,
-                        width=largura_tela,
+                        height=altura_alvo,
+                        width=largura_alvo,
                         drawing_mode="rect",
                         key="canvas_corretor",
                     )
             except Exception as e:
-                st.error(f"Erro ao carregar o arquivo: {e}")
+                # Se o erro do PIL persistir, usamos a URL como última alternativa
+                if "image_to_url" in str(e) or "height" in str(e):
+                    try:
+                        st.warning("Usando modo de compatibilidade para exibição.")
+                        canvas_result = st_canvas(
+                            fill_color=cor_pincel,
+                            stroke_width=1,
+                            stroke_color="#000",
+                            background_image=url_original, 
+                            update_streamlit=True,
+                            height=800, # Altura fixa para evitar erro de 'str'
+                            width=800,
+                            drawing_mode="rect",
+                            key="canvas_corretor_compat",
+                        )
+                    except:
+                        st.error(f"Erro crítico ao carregar imagem: {e}")
+                else:
+                    st.error(f"Erro ao carregar o arquivo: {e}")
         else:
             st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
 
