@@ -47,95 +47,102 @@ st.title("⚖️ Sistema de Correção por Pontos")
 redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
 lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
+# ... (mantenha o início do código igual até a parte da busca de redações)
+
 if not lista:
     st.info("Tudo corrigido por aqui! ☕")
 else:
     escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" for r in lista])
     redacao = next(r for r in lista if f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" == escolha)
 
-    # --- AJUSTE DE LAYOUT: Prioridade total para a imagem (4 para 1) ---
-    col1, col2 = st.columns([4, 1])
+    # --- ÁREA DA REDAÇÃO (ESPAÇO TOTAL) ---
+    st.write("### 📝 Folha de Redação")
+    st.info("💡 Clique na imagem para marcar um erro. As marcações aparecerão numeradas.")
+    
+    caminho = redacao.get('caminho_storage')
+    url_full = redacao.get('url_arquivo', '')
 
-    with col1:
-        st.markdown('<div class="img-container">', unsafe_allow_html=True)
-        st.write("### 📝 Folha de Redação")
-        
-        caminho = redacao.get('caminho_storage')
-        url_full = redacao.get('url_arquivo', '')
+    if not caminho and url_full:
+        bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
+        if bucket_name in url_full:
+            caminho = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
 
-        if not caminho and url_full:
-            bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
-            if bucket_name in url_full:
-                caminho = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
+    if caminho:
+        try:
+            blob = bucket.blob(caminho)
+            img_bytes = blob.download_as_bytes()
+            img_original = Image.open(BytesIO(img_bytes)).convert("RGB")
+            
+            # Mantendo a largura de 1000px que você aprovou
+            LARGURA_CALIBRADA = 1000 
+            w_orig, h_orig = img_original.size
+            altura_calibrada = int(LARGURA_CALIBRADA * (h_orig / w_orig))
+            
+            img_para_exibir = img_original.resize((LARGURA_CALIBRADA, altura_calibrada))
+            draw = ImageDraw.Draw(img_para_exibir)
+            
+            for i, ponto in enumerate(st.session_state.pontos_correcao):
+                x, y = ponto["x"], ponto["y"]
+                raio = 20
+                draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
+                draw.text((x-5, y-8), str(i+1), fill="white")
 
-        if caminho:
-            try:
-                blob = bucket.blob(caminho)
-                img_bytes = blob.download_as_bytes()
-                img_original = Image.open(BytesIO(img_bytes)).convert("RGB")
-                
-                LARGURA_CALIBRADA = 1000 
-                w_orig, h_orig = img_original.size
-                altura_calibrada = int(LARGURA_CALIBRADA * (h_orig / w_orig))
-                
-                img_para_exibir = img_original.resize((LARGURA_CALIBRADA, altura_calibrada))
-                draw = ImageDraw.Draw(img_para_exibir)
-                
-                for i, ponto in enumerate(st.session_state.pontos_correcao):
-                    x, y = ponto["x"], ponto["y"]
-                    raio = 18
-                    draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
-                    draw.text((x-5, y-8), str(i+1), fill="white")
+            # Exibição centralizada da imagem
+            value = streamlit_image_coordinates(img_para_exibir, key="editor_v5_vertical")
 
-                value = streamlit_image_coordinates(img_para_exibir, key="editor_precisao_v4")
+            if value:
+                novo_ponto = {"x": value["x"], "y": value["y"]}
+                if novo_ponto not in st.session_state.pontos_correcao:
+                    st.session_state.pontos_correcao.append(novo_ponto)
+                    st.rerun()
 
-                if value:
-                    novo_ponto = {"x": value["x"], "y": value["y"]}
-                    if novo_ponto not in st.session_state.pontos_correcao:
-                        st.session_state.pontos_correcao.append(novo_ponto)
-                        st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao carregar imagem: {e}")
 
-            except Exception as e:
-                st.error(f"Erro de visualização: {e}")
-        else:
-            st.error("Arquivo não encontrado.")
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.divider()
 
-    with col2:
-        st.write("### 📊 Notas")
-        if st.button("Limpar marcas 🗑️"):
+    # --- ÁREA DE NOTAS E COMENTÁRIOS (AGORA EMBAIXO) ---
+    st.write("### 📊 Painel de Avaliação")
+    
+    col_btn1, col_btn2 = st.columns([1, 5])
+    with col_btn1:
+        if st.button("Limpar Marcas 🗑️"):
             st.session_state.pontos_correcao = []
             st.rerun()
 
-        with st.form("form_final"):
-            st.write("#### Competências")
-            n1 = st.number_input("C1", 0, 200, 160, 40)
-            n2 = st.number_input("C2", 0, 200, 160, 40)
-            n3 = st.number_input("C3", 0, 200, 160, 40)
-            n4 = st.number_input("C4", 0, 200, 160, 40)
-            n5 = st.number_input("C5", 0, 200, 160, 40)
-            
-            st.divider()
-            
-            comentarios_lista = []
-            if st.session_state.pontos_correcao:
-                st.write("#### 💬 Comentários")
-                for i, ponto in enumerate(st.session_state.pontos_correcao):
-                    txt = st.text_input(f"Erro {i+1}", key=f"txt_{i}")
-                    comentarios_lista.append({"x": ponto['x'], "y": ponto['y'], "texto": txt})
-            
-            feedback_geral = st.text_area("Feedback Geral")
-            
-            if st.form_submit_button("Enviar Correção", type="primary"):
-                db.collection("redacoes").document(redacao['id']).update({
-                    "status": "Corrigida",
-                    "anotacoes_detalhadas": comentarios_lista,
-                    "notas": [n1, n2, n3, n4, n5],
-                    "nota_final": n1+n2+n3+n4+n5,
-                    "feedback_geral": feedback_geral,
-                    "data_correcao": firestore.SERVER_TIMESTAMP
-                })
-                st.session_state.pontos_correcao = []
-                st.success("✅ Enviado!")
-                time.sleep(1)
-                st.rerun()
+    with st.form("form_final_vertical"):
+        # Organizando as competências em colunas para não ocupar tanto espaço vertical
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1: n1 = st.number_input("C1", 0, 200, 160, 40)
+        with c2: n2 = st.number_input("C2", 0, 200, 160, 40)
+        with c3: n3 = st.number_input("C3", 0, 200, 160, 40)
+        with c4: n4 = st.number_input("C4", 0, 200, 160, 40)
+        with c5: n5 = st.number_input("C5", 0, 200, 160, 40)
+        
+        st.write("#### 💬 Detalhamento dos Erros")
+        comentarios_lista = []
+        # Exibe os inputs de comentário em uma grade (2 por linha)
+        if st.session_state.pontos_correcao:
+            for i, ponto in enumerate(st.session_state.pontos_correcao):
+                txt = st.text_input(f"Comentário para o Erro {i+1}", key=f"txt_v_{i}")
+                comentarios_lista.append({"x": ponto['x'], "y": ponto['y'], "texto": txt})
+        else:
+            st.info("Nenhum ponto marcado na imagem ainda.")
+
+        feedback_geral = st.text_area("Feedback Geral para o Aluno", height=150)
+        
+        # Centralizando o botão de envio
+        _, col_sub, _ = st.columns([2, 1, 2])
+        if col_sub.form_submit_button("Enviar Correção Completa", type="primary", use_container_width=True):
+            db.collection("redacoes").document(redacao['id']).update({
+                "status": "Corrigida",
+                "anotacoes_detalhadas": comentarios_lista,
+                "notas": [n1, n2, n3, n4, n5],
+                "nota_final": n1+n2+n3+n4+n5,
+                "feedback_geral": feedback_geral,
+                "data_correcao": firestore.SERVER_TIMESTAMP
+            })
+            st.session_state.pontos_correcao = []
+            st.success("✅ Correção finalizada e enviada!")
+            time.sleep(1.5)
+            st.rerun()
