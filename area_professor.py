@@ -37,15 +37,14 @@ def modal_comentario(index):
     st.write(f"### Erro {index + 1}")
     ponto_atual = st.session_state.pontos_correcao[index]
     
-    # Chave temporária para o modal
     comentario_temp = st.text_area("O que está errado?", 
                                   value=ponto_atual.get('texto', ""), 
                                   height=150)
     
     if st.button("Salvar e Fechar", type="primary", use_container_width=True):
-        # SALVAMENTO DUPLO: No banco de dados da lista e na 'key' do widget de baixo
+        # Sincroniza o texto em todos os lugares da memória
         st.session_state.pontos_correcao[index]['texto'] = comentario_temp
-        st.session_state[f"f_input_{index}"] = comentario_temp # SINCRONIZAÇÃO AQUI
+        st.session_state[f"f_input_{index}"] = comentario_temp
         
         st.session_state.ponto_para_comentar = None
         st.rerun()
@@ -54,14 +53,20 @@ def modal_comentario(index):
 tab_correcao, tab_temas = st.tabs(["🖋️ Corrigir Redações", "📋 Gerenciar Temas"])
 
 with tab_correcao:
-    # REFORÇO DO FREIO DE SCROLL: JavaScript injetado no topo
+    # --- HACK DE SCROLL MAIS FORTE ---
+    # Injetamos o script para rodar no container principal do Streamlit
     components.html(
         """
         <script>
-            var mainSection = window.parent.document.querySelector('section.main');
-            if (mainSection) {
-                mainSection.scrollTo(0, 0);
+            var scroll_helper = function() {
+                var el = window.parent.document.querySelector('[data-testid="stAppViewContainer"]');
+                if (el) {
+                    el.scrollTo(0, 0);
+                }
             }
+            scroll_helper();
+            // Executa novamente após um pequeno delay para garantir que o Streamlit terminou de renderizar
+            setTimeout(scroll_helper, 100);
         </script>
         """,
         height=0
@@ -76,12 +81,12 @@ with tab_correcao:
     lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
     if not lista:
-        st.info("Nenhuma redação para corrigir. ☕")
+        st.info("Tudo corrigido! ☕")
     else:
         escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome')} - {r.get('tema')}" for r in lista])
         redacao = next(r for r in lista if f"{r.get('aluno_nome')} - {r.get('tema')}" == escolha)
 
-        # --- ÁREA DA IMAGEM ---
+        # --- EXIBIÇÃO DA IMAGEM ---
         st.write("#### 📝 Folha de Redação")
         caminho = redacao.get('caminho_storage')
         url_full = redacao.get('url_arquivo', '')
@@ -105,7 +110,7 @@ with tab_correcao:
                     draw.ellipse([x-r, y-r, x+r, y+r], fill="red", outline="white", width=3)
                     draw.text((x-4, y-6), str(i+1), fill="white")
 
-                value = streamlit_image_coordinates(img_edit, key="editor_v14")
+                value = streamlit_image_coordinates(img_edit, key="editor_v15")
 
                 if value and value != st.session_state.ultimo_clique:
                     st.session_state.ultimo_clique = value
@@ -121,7 +126,6 @@ with tab_correcao:
         st.write("#### 📊 Painel de Avaliação")
         
         if st.button("Limpar Marcas 🗑️"):
-            # Limpa tudo, inclusive as memórias das caixas de texto
             chaves_para_limpar = [k for k in st.session_state.keys() if k.startswith("f_input_")]
             for k in chaves_para_limpar:
                 del st.session_state[k]
@@ -129,7 +133,7 @@ with tab_correcao:
             st.session_state.ultimo_clique = None
             st.rerun()
 
-        with st.form("form_final_v14"):
+        with st.form("form_final_v15"):
             st.write("**Notas (Competências 1 a 5)**")
             c1, c2, c3, c4, c5 = st.columns(5)
             n1 = c1.number_input("C1", 0, 200, 160, 20)
@@ -142,16 +146,17 @@ with tab_correcao:
             lista_final = []
             if st.session_state.pontos_correcao:
                 for i, p in enumerate(st.session_state.pontos_correcao):
-                    # AGORA AS CAIXAS PUXAM DIRETO DA MEMÓRIA ATUALIZADA PELO MODAL
-                    txt = st.text_input(f"Comentário {i+1}", key=f"f_input_{i}")
-                    
-                    # Atualiza a lista principal caso o professor edite aqui embaixo
+                    # Forçamos o valor do input a ser o que está no session_state
+                    txt = st.text_input(f"Comentário {i+1}", 
+                                        value=st.session_state.get(f"f_input_{i}", p.get('texto', "")),
+                                        key=f"f_input_{i}")
+                    # Atualiza a lista principal
                     p['texto'] = txt
                     lista_final.append({"x": p['x'], "y": p['y'], "texto": txt})
             else:
                 st.info("Clique na imagem acima para marcar os erros.")
 
-            fb_geral = st.text_area("Feedback Geral para o Aluno")
+            fb_geral = st.text_area("Feedback Geral")
             
             if st.form_submit_button("Enviar Correção Completa", type="primary", use_container_width=True):
                 db.collection("redacoes").document(redacao['id']).update({
@@ -159,18 +164,17 @@ with tab_correcao:
                     "notas": [n1, n2, n3, n4, n5], "nota_final": sum([n1, n2, n3, n4, n5]),
                     "feedback_geral": fb_geral, "data_correcao": firestore.SERVER_TIMESTAMP
                 })
-                # Limpa tudo após o envio
                 chaves_para_limpar = [k for k in st.session_state.keys() if k.startswith("f_input_")]
                 for k in chaves_para_limpar:
                     del st.session_state[k]
                 st.session_state.pontos_correcao = []
                 st.session_state.ultimo_clique = None
-                st.success("✅ Correção enviada!"); time.sleep(1); st.rerun()
+                st.success("✅ Enviado!"); time.sleep(1); st.rerun()
 
 # --- ABA DE TEMAS ---
 with tab_temas:
     st.title("📋 Gerenciar Temas")
-    with st.form("form_tema_v14"):
+    with st.form("form_tema_v15"):
         nome_t = st.text_input("Nome do Tema:")
         pdf_t = st.file_uploader("PDF de Apoio:", type=["pdf"])
         if st.form_submit_button("Cadastrar Tema"):
