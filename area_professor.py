@@ -14,11 +14,9 @@ st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="
 # --- CSS PARA EVITAR ATROPELAMENTO ---
 st.markdown("""
     <style>
-    /* Garante que as colunas tenham um espaçamento real */
     [data-testid="column"] {
         padding-right: 25px !important;
     }
-    /* Impede que o conteúdo da imagem transborde e cubra a lateral */
     .img-container {
         overflow-x: auto;
         border-right: 1px solid #eee;
@@ -47,15 +45,13 @@ st.title("⚖️ Sistema de Correção por Pontos")
 redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
 lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
-# ... (mantenha o início do código igual até a parte da busca de redações)
-
 if not lista:
     st.info("Tudo corrigido por aqui! ☕")
 else:
     escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" for r in lista])
     redacao = next(r for r in lista if f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" == escolha)
 
-    # --- ÁREA DA REDAÇÃO (ESPAÇO TOTAL) ---
+    # --- ÁREA DA REDAÇÃO ---
     st.write("### 📝 Folha de Redação")
     st.info("💡 Clique na imagem para marcar um erro. As marcações aparecerão numeradas.")
     
@@ -73,7 +69,6 @@ else:
             img_bytes = blob.download_as_bytes()
             img_original = Image.open(BytesIO(img_bytes)).convert("RGB")
             
-            # Mantendo a largura de 1000px que você aprovou
             LARGURA_CALIBRADA = 1000 
             w_orig, h_orig = img_original.size
             altura_calibrada = int(LARGURA_CALIBRADA * (h_orig / w_orig))
@@ -87,7 +82,6 @@ else:
                 draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
                 draw.text((x-5, y-8), str(i+1), fill="white")
 
-            # Exibição centralizada da imagem
             value = streamlit_image_coordinates(img_para_exibir, key="editor_v5_vertical")
 
             if value:
@@ -101,17 +95,46 @@ else:
 
     st.divider()
 
-    # --- ÁREA DE NOTAS E COMENTÁRIOS (AGORA EMBAIXO) ---
+    # --- ÁREA DE AVALIAÇÃO ---
     st.write("### 📊 Painel de Avaliação")
-    
-    col_btn1, col_btn2 = st.columns([1, 5])
+
+    # NOVA FUNCIONALIDADE: NEGAR CORREÇÃO
+    with st.expander("🚫 Negar Correção (Problemas com o arquivo)"):
+        st.warning("Use esta opção se a redação não puder ser avaliada.")
+        motivo = st.selectbox(
+            "Selecione o motivo da negativa:",
+            [
+                "Problema técnico na imagem",
+                "Letra ilegível",
+                "Imagem muito desfocada",
+                "Folha em branco / Texto inexistente",
+                "Arquivo incorreto"
+            ]
+        )
+        obs_negativa = st.text_input("Observação para o aluno (opcional):")
+        
+        if st.button("Confirmar Negativa", type="secondary", use_container_width=True):
+            db.collection("redacoes").document(redacao['id']).update({
+                "status": "Negada",
+                "motivo_negativa": motivo,
+                "obs_negativa": obs_negativa,
+                "data_correcao": firestore.SERVER_TIMESTAMP
+            })
+            st.session_state.pontos_correcao = []
+            st.error(f"Redação marcada como 'Negada' por: {motivo}")
+            time.sleep(1.5)
+            st.rerun()
+
+    st.divider()
+
+    # FORMULÁRIO DE CORREÇÃO NORMAL
+    col_btn1, _ = st.columns([1, 5])
     with col_btn1:
         if st.button("Limpar Marcas 🗑️"):
             st.session_state.pontos_correcao = []
             st.rerun()
 
     with st.form("form_final_vertical"):
-        # Organizando as competências em colunas para não ocupar tanto espaço vertical
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1: n1 = st.number_input("C1", 0, 200, 160, 40)
         with c2: n2 = st.number_input("C2", 0, 200, 160, 40)
@@ -121,7 +144,6 @@ else:
         
         st.write("#### 💬 Detalhamento dos Erros")
         comentarios_lista = []
-        # Exibe os inputs de comentário em uma grade (2 por linha)
         if st.session_state.pontos_correcao:
             for i, ponto in enumerate(st.session_state.pontos_correcao):
                 txt = st.text_input(f"Comentário para o Erro {i+1}", key=f"txt_v_{i}")
@@ -131,7 +153,6 @@ else:
 
         feedback_geral = st.text_area("Feedback Geral para o Aluno", height=150)
         
-        # Centralizando o botão de envio
         _, col_sub, _ = st.columns([2, 1, 2])
         if col_sub.form_submit_button("Enviar Correção Completa", type="primary", use_container_width=True):
             db.collection("redacoes").document(redacao['id']).update({
