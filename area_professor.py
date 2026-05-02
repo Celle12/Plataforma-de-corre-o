@@ -44,26 +44,29 @@ else:
         st.write("### 📝 Folha de Redação")
         st.info("💡 Clique na imagem onde encontrar um erro para marcar um ponto.")
         
-        # Download da Imagem
-        blob = bucket.blob(redacao['caminho_storage'])
-        img_bytes = blob.download_as_bytes()
-        img = Image.open(BytesIO(img_bytes))
-        
-        # Desenhar os pontos já marcados na imagem para o professor ver
-        draw = ImageDraw.Draw(img)
-        for p in st.session_state.pontos_correcao:
-            coords = [p['x']-10, p['y']-10, p['x']+10, p['y']+10]
-            draw.ellipse(coords, fill="red", outline="white")
+        # 1. Tenta pegar o caminho ou a URL com segurança
+        caminho = redacao.get('caminho_storage')
+        url_full = redacao.get('url_arquivo', '')
 
-        # O componente de coordenadas (Substitui o Canvas)
-        # Ele retorna exatamente onde o professor clicou
-        value = streamlit_image_coordinates(img, key="coords_redacao")
+        # 2. Se o caminho estiver vazio, tentamos extrair da URL (o fallback que tínhamos antes)
+        if not caminho and url_full:
+            from urllib.parse import unquote
+            bucket_name = "plataforma-redacao-de0f3.firebasestorage.app"
+            if bucket_name in url_full:
+                caminho = unquote(url_full.split(bucket_name + "/")[-1].split("?")[0])
 
-        if value:
-            novo_ponto = {"x": value["x"], "y": value["y"]}
-            if novo_ponto not in [p for p in st.session_state.pontos_correcao]:
-                st.session_state.pontos_correcao.append(novo_ponto)
-                st.rerun()
+        if caminho:
+            try:
+                # Download da Imagem usando o caminho recuperado
+                blob = bucket.blob(caminho)
+                img_bytes = blob.download_as_bytes()
+                img = Image.open(BytesIO(img_bytes))
+                
+                # ... (resto do código do desenho dos pontos e streamlit_image_coordinates)
+            except Exception as e:
+                st.error(f"Erro ao acessar arquivo no Storage: {e}")
+        else:
+            st.error("Não foi possível encontrar o rastro desse arquivo no banco de dados.")
 
     with col2:
         st.write("### 📊 Notas e Feedback")
