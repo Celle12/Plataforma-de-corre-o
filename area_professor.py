@@ -1,12 +1,28 @@
 import streamlit as st
 import json
 import time
+import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
 from google.oauth2 import service_account
-from streamlit_drawable_canvas import st_canvas
 from urllib.parse import unquote
+
+# --- A "VACINA" PARA O ERRO DO CANVAS ---
+# Ensinamos o Streamlit novo a entender a função que o Canvas antigo precisa
+import streamlit.elements.image as st_image
+if not hasattr(st_image, 'image_to_url'):
+    def _mock_image_to_url(image, *args, **kwargs):
+        buffered = BytesIO()
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+    st_image.image_to_url = _mock_image_to_url
+
+# Agora sim, importamos o Canvas com segurança!
+from streamlit_drawable_canvas import st_canvas
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
@@ -69,48 +85,29 @@ else:
                     st.warning("⚠️ Arquivo PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
-                    # PROCESSAMENTO INOVADOR DA IMAGEM
-                    img_original = Image.open(BytesIO(conteudo_bytes))
+                    # PROCESSAMENTO OFICIAL DA IMAGEM
+                    imagem_pil = Image.open(BytesIO(conteudo_bytes))
                     largura_alvo = 800
-                    largura_orig, altura_orig = img_original.size
+                    largura_orig, altura_orig = imagem_pil.size
                     altura_alvo = int(largura_alvo * (altura_orig / largura_orig))
-                    
-                    # Redimensionamos a imagem na mão para o tamanho exato da tela
-                    img_redimensionada = img_original.resize((largura_alvo, altura_alvo))
                     
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
                     st.info("💡 Desenhe retângulos sobre os erros.")
                     
-                    # A GRANDE SACADA: 
-                    # Ao invés de usar background_image (que causa todos os erros),
-                    # nós renderizamos a imagem fora do canvas usando o Streamlit padrão.
-                    # O canvas fica "transparente" em cima da imagem!
-                    
-                    # Container para colocar o canvas por cima da imagem
-                    container_imagem = st.container()
-                    
-                    with container_imagem:
-                        # Exibe a imagem estática de forma nativa e à prova de falhas
-                        st.image(img_redimensionada, use_column_width=False)
-                        
-                        # Coloca um canvas transparente logo em seguida
-                        # CSS do Streamlit naturalmente posiciona as coisas, mas aqui
-                        # o usuário desenha em um quadro vazio que fica visualmente acima.
-                        # Para evitar qualquer conflito, tiramos a imagem do canvas.
-                        canvas_result = st_canvas(
-                            fill_color=cor_pincel,
-                            stroke_width=1,
-                            stroke_color="#000",
-                            background_color="rgba(0, 0, 0, 0)", # Transparente!
-                            update_streamlit=True,
-                            height=altura_alvo,
-                            width=largura_alvo,
-                            drawing_mode="rect",
-                            key="canvas_transparente",
-                        )
-                        
+                    # Canvas oficial com a imagem travada no fundo
+                    canvas_result = st_canvas(
+                        fill_color=cor_pincel,
+                        stroke_width=1,
+                        stroke_color="#000",
+                        background_image=imagem_pil, # Usando a imagem diretamente!
+                        update_streamlit=True,
+                        height=altura_alvo,
+                        width=largura_alvo,
+                        drawing_mode="rect",
+                        key="canvas_corretor_oficial",
+                    )
             except Exception as e:
                 st.error(f"Erro ao carregar imagem: {e}")
         else:
@@ -127,7 +124,7 @@ else:
             if canvas_result and canvas_result.json_data:
                 objetos = canvas_result.json_data["objects"]
                 for i, obj in enumerate(objetos):
-                    comentario = st.text_input(f"Comentário {i+1}", key=f"c_{i}")
+                    comentario = st.text_input(f"Comentário do Destaque {i+1}", key=f"c_{i}")
                     comentarios_caixinhas.append({
                         "id_caixa": i, "comentario": comentario,
                         "posicao": {"left": obj['left'], "top": obj['top'], "color": obj['fill']}
