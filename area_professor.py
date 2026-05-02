@@ -1,17 +1,37 @@
 import streamlit as st
 import json
 import time
+import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
 from google.oauth2 import service_account
-from streamlit_drawable_canvas import st_canvas
 from urllib.parse import unquote
 
-# 1. Configuração da Página
+# --- 1. A VACINA UNIVERSAL (Conserta a comunicação entre as bibliotecas) ---
+import streamlit.elements.image as st_image
+
+def vacina_image_to_url(data, *args, **kwargs):
+    """Transforma qualquer imagem em um link que o Canvas entende, 
+    ignorando erros de argumentos extras do Streamlit 1.57."""
+    if isinstance(data, str):
+        return data
+    buffered = BytesIO()
+    if data.mode != "RGB":
+        data = data.convert("RGB")
+    data.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
+# Aplicamos a vacina no coração do Streamlit
+st_image.image_to_url = vacina_image_to_url
+
+# Só agora importamos o Canvas
+from streamlit_drawable_canvas import st_canvas
+
+# --- 2. CONFIGURAÇÕES INICIAIS ---
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
-# 2. Conexão com Firestore e Storage
 @st.cache_resource
 def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
@@ -23,7 +43,6 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 3. Estilização das Competências
 COMPETENCIAS = {
     "C1 - Gramática": "#0000FF33", "C2 - Repertório": "#00FF0033",
     "C3 - Argumentação": "#FFFF0033", "C4 - Coesão": "#FFA50033", "C5 - Proposta": "#FF000033"
@@ -31,7 +50,7 @@ COMPETENCIAS = {
 
 st.title("⚖️ Painel de Correção Profissional")
 
-# 4. Listagem de Redações Pendentes
+# --- 3. LOGICA DE SELEÇÃO ---
 redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
 lista_redacoes = [ {**r.to_dict(), 'id': r.id} for r in redacoes_ref ]
 
@@ -39,7 +58,7 @@ if not lista_redacoes:
     st.info("Nenhuma redação pendente por enquanto! ☕")
 else:
     opcoes = {f"{r.get('aluno_nome', 'Sem Nome')} - {r['tema']}": r for r in lista_redacoes}
-    escolha = st.selectbox("Selecione uma redação para corrigir:", list(opcoes.keys()))
+    escolha = st.selectbox("Selecione uma redação:", list(opcoes.keys()))
     redacao = opcoes[escolha]
 
     col1, col2 = st.columns([2, 1])
@@ -61,12 +80,12 @@ else:
                 conteudo_bytes = blob.download_as_bytes()
                 
                 if nome_arquivo_storage.lower().endswith(".pdf"):
-                    st.warning("⚠️ PDF detectado. Baixe para corrigir.")
+                    st.warning("⚠️ PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
                     imagem_pil = Image.open(BytesIO(conteudo_bytes))
                     
-                    # Otimização visual: Mantendo a proporção (ou forçando 4:5 se desejar)
+                    # Ajuste de tamanho para o painel
                     largura_alvo = 800
                     w, h = imagem_pil.size
                     altura_alvo = int(largura_alvo * (h / w))
@@ -74,66 +93,32 @@ else:
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
-                    # --- A SOLUÇÃO CIRÚRGICA: CSS GRID STACK ---
-                    # Isso cria uma "pilha" onde a imagem fica embaixo e o canvas em cima.
-                    st.markdown(f"""
-                        <style>
-                        .canvas-stack {{
-                            display: grid;
-                            grid-template-areas: "overlay";
-                            width: {largura_alvo}px;
-                            height: {altura_alvo}px;
-                        }}
-                        .canvas-stack > * {{
-                            grid-area: overlay;
-                        }}
-                        /* Bloqueia o arrasto da imagem fantasma */
-                        .canvas-stack img {{
-                            pointer-events: none;
-                            user-select: none;
-                        }}
-                        /* Garante que o canvas seja transparente e fique no topo */
-                        .canvas-stack .stCanvas {{
-                            z-index: 10;
-                            background-color: transparent !important;
-                        }}
-                        </style>
-                    """, unsafe_allow_html=True)
+                    st.info("💡 Desenhe os retângulos diretamente na folha abaixo.")
 
-                    st.markdown('<div class="canvas-stack">', unsafe_allow_html=True)
-                    
-                    # 1. Imagem de Fundo (Nativa e Segura)
-                    st.image(imagem_pil, width=largura_alvo)
-                    
-                    # 2. Canvas para Desenho (Sem background_image para evitar erros)
+                    # O Canvas agora volta a receber a imagem no fundo com segurança
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_color="rgba(0,0,0,0)",
+                        background_image=imagem_pil, # A PIL entra aqui e a vacina faz o resto
                         update_streamlit=True,
                         height=altura_alvo,
                         width=largura_alvo,
                         drawing_mode="rect",
-                        key="canvas_stack_final",
+                        key="canvas_final_v5",
                     )
-                    
-                    st.markdown('</div>', unsafe_allow_html=True)
-                    st.info("💡 Desenhe sobre os erros diretamente na imagem acima.")
 
             except Exception as e:
-                st.error(f"Erro na visualização: {e}")
+                st.error(f"Erro ao carregar folha: {e}")
         else:
-            st.text_area("Texto:", redacao.get('texto'), height=500, disabled=True)
+            st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
 
     with col2:
         st.write("### 📊 Notas e Comentários")
         with st.form("form_correcao"):
-            n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
-            n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
-            n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
-            n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
-            n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
+            n1 = st.slider("C1", 0, 200, 0, 40); n2 = st.slider("C2", 0, 200, 0, 40)
+            n3 = st.slider("C3", 0, 200, 0, 40); n4 = st.slider("C4", 0, 200, 0, 40)
+            n5 = st.slider("C5", 0, 200, 0, 40)
             
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
@@ -156,5 +141,5 @@ else:
                     "anotacoes_detalhadas": comentarios_caixinhas,
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
-                st.success("✅ Correção enviada com sucesso!")
+                st.success("✅ Correção enviada!")
                 time.sleep(1); st.rerun()
