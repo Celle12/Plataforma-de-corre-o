@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import time
+import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
@@ -10,6 +11,13 @@ from urllib.parse import unquote
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
+
+# Função que transforma a imagem real em texto (Bypassa o erro image_to_url)
+def pil_para_base64(img):
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 # 2. Conexão com Firestore e Storage
 @st.cache_resource
@@ -27,11 +35,8 @@ db, bucket = iniciar_servicos()
 
 # 3. Estilização
 COMPETENCIAS = {
-    "C1 - Gramática": "#0000FF33",
-    "C2 - Repertório": "#00FF0033",
-    "C3 - Argumentação": "#FFFF0033",
-    "C4 - Coesão": "#FFA50033",
-    "C5 - Proposta": "#FF000033"
+    "C1 - Gramática": "#0000FF33", "C2 - Repertório": "#00FF0033",
+    "C3 - Argumentação": "#FFFF0033", "C4 - Coesão": "#FFA50033", "C5 - Proposta": "#FF000033"
 }
 
 st.title("⚖️ Painel de Correção Profissional")
@@ -55,7 +60,6 @@ else:
         
         if redacao.get('tipo') == 'arquivo':
             try:
-                # Localização do arquivo
                 url_full = redacao.get('url_arquivo', '')
                 nome_arquivo_storage = redacao.get('caminho_storage')
 
@@ -66,7 +70,6 @@ else:
                     elif "/o/" in url_full:
                         nome_arquivo_storage = unquote(url_full.split("/o/")[1].split("?")[0])
 
-                # Download e abertura da imagem
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_bytes = blob.download_as_bytes()
                 
@@ -74,32 +77,32 @@ else:
                     st.warning("⚠️ Arquivo PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
-                    # AQUI ESTÁ A CORREÇÃO:
-                    # Abrimos a imagem como objeto PIL
-                    imagem_pil = Image.open(BytesIO(conteudo_bytes))
+                    # Abre a imagem APENAS para medir o tamanho
+                    img_medida = Image.open(BytesIO(conteudo_bytes))
+                    largura_alvo = 800
+                    largura_orig, altura_orig = img_medida.size
+                    altura_alvo = int(largura_alvo * (altura_orig / largura_orig))
                     
-                    # Calculamos o tamanho usando a imagem real
-                    largura_display = 800
-                    largura_orig, altura_orig = imagem_pil.size
-                    altura_display = int(largura_display * (altura_orig / largura_orig))
+                    # Converte a imagem para Base64 (Texto)
+                    imagem_texto_base64 = pil_para_base64(img_medida)
                     
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
                     st.info("💡 Desenhe retângulos sobre os erros.")
                     
-                    # PASSAMOS O OBJETO PIL DIRETO: Como a versão do canvas agora é a nova,
-                    # ele não vai dar mais aquele erro de 'image_to_url'.
+                    # A SOLUÇÃO FINAL: Passamos a string Base64.
+                    # O Canvas da versão antiga (0.9.3) lê isso perfeitamente sem dar erro de PIL.
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_image=imagem_pil, 
+                        background_image=imagem_texto_base64, # Passando Base64 aqui!
                         update_streamlit=True,
-                        height=altura_display,
-                        width=largura_display,
+                        height=altura_alvo,
+                        width=largura_alvo,
                         drawing_mode="rect",
-                        key="canvas_final",
+                        key="canvas_definitivo",
                     )
             except Exception as e:
                 st.error(f"Erro ao carregar imagem: {e}")
