@@ -67,9 +67,20 @@ else:
             url_full = redacao['url_arquivo']
             
             try:
-                # Extrai o caminho real do arquivo dentro do Storage
-                # Exemplo: de uma URL longa, pega apenas 'redacoes/arquivo.jpg'
-                nome_arquivo_storage = url_full.split("/o/")[1].split("?")[0].replace("%2F", "/").replace("%40", "@")
+                # TENTA IDENTIFICAR O NOME DO ARQUIVO DE DOIS JEITOS DIFERENTES
+                if "/o/" in url_full:
+                    # Formato Firebase: .../o/nome%2Farquivo?alt...
+                    nome_arquivo_storage = url_full.split("/o/")[1].split("?")[0].replace("%2F", "/").replace("%40", "@")
+                else:
+                    # Formato Google Cloud: .../bucket/nome/arquivo
+                    # Pega tudo que vem depois do nome do seu bucket
+                    nome_arquivo_storage = url_full.split(bucket.name + "/")[-1]
+
+                # Agora o código segue igual...
+                blob = bucket.blob(nome_arquivo_storage)
+                conteudo_arquivo = blob.download_as_bytes()
+                
+                # (O restante do código de verificação de PDF e Canvas continua o mesmo daqui para baixo)
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_arquivo = blob.download_as_bytes()
                 
