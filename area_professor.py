@@ -1,7 +1,6 @@
 import streamlit as st
 import json
 import time
-import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
@@ -11,13 +10,6 @@ from urllib.parse import unquote
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
-
-# Função essencial para evitar o erro 'image_to_url'
-def converter_para_b64(img_pil):
-    buffered = BytesIO()
-    img_pil.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
 
 # 2. Conexão com Firestore e Storage
 @st.cache_resource
@@ -33,26 +25,20 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 3. Estilização das Competências
+# 3. Estilização
 COMPETENCIAS = {
-    "C1 - Gramática": "#0000FF33",  # Azul
-    "C2 - Repertório": "#00FF0033", # Verde
-    "C3 - Argumentação": "#FFFF0033", # Amarelo
-    "C4 - Coesão": "#FFA50033",    # Laranja
-    "C5 - Proposta": "#FF000033"   # Vermelho
+    "C1 - Gramática": "#0000FF33",
+    "C2 - Repertório": "#00FF0033",
+    "C3 - Argumentação": "#FFFF0033",
+    "C4 - Coesão": "#FFA50033",
+    "C5 - Proposta": "#FF000033"
 }
 
 st.title("⚖️ Painel de Correção Profissional")
 
 # 4. Listagem de Redações Pendentes
-st.subheader("📥 Redações Aguardando Correção")
 redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
-lista_redacoes = []
-
-for r in redacoes_ref:
-    dado = r.to_dict()
-    dado['id'] = r.id
-    lista_redacoes.append(dado)
+lista_redacoes = [ {**r.to_dict(), 'id': r.id} for r in redacoes_ref ]
 
 if not lista_redacoes:
     st.info("Nenhuma redação pendente por enquanto! ☕")
@@ -80,10 +66,7 @@ else:
                     elif "/o/" in url_full:
                         nome_arquivo_storage = unquote(url_full.split("/o/")[1].split("?")[0])
 
-                if not nome_arquivo_storage:
-                    raise Exception("Caminho do arquivo não identificado.")
-
-                # Download e Processamento
+                # Download e abertura da imagem
                 blob = bucket.blob(nome_arquivo_storage)
                 conteudo_bytes = blob.download_as_bytes()
                 
@@ -91,77 +74,65 @@ else:
                     st.warning("⚠️ Arquivo PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
+                    # AQUI ESTÁ A CORREÇÃO:
+                    # Abrimos a imagem como objeto PIL
                     imagem_pil = Image.open(BytesIO(conteudo_bytes))
                     
-                    # Cálculo de dimensões reais
+                    # Calculamos o tamanho usando a imagem real
                     largura_display = 800
-                    w, h = imagem_pil.size
-                    altura_display = int(largura_display * (h / w))
-                    
-                    # A MÁGICA: Transformamos em Base64 antes de enviar para o Canvas
-                    imagem_final_b64 = converter_para_b64(imagem_pil)
+                    largura_orig, altura_orig = imagem_pil.size
+                    altura_display = int(largura_display * (altura_orig / largura_orig))
                     
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
                     st.info("💡 Desenhe retângulos sobre os erros.")
                     
-                    # Agora passamos a string Base64. Isso pula a função problemática do Streamlit.
+                    # PASSAMOS O OBJETO PIL DIRETO: Como a versão do canvas agora é a nova,
+                    # ele não vai dar mais aquele erro de 'image_to_url'.
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_image=imagem_final_b64, 
+                        background_image=imagem_pil, 
                         update_streamlit=True,
                         height=altura_display,
                         width=largura_display,
                         drawing_mode="rect",
-                        key="canvas_corretor_v3",
+                        key="canvas_final",
                     )
             except Exception as e:
-                st.error(f"Erro crítico ao carregar imagem: {e}")
+                st.error(f"Erro ao carregar imagem: {e}")
         else:
-            st.text_area("Texto da Redação:", redacao.get('texto'), height=500, disabled=True)
+            st.text_area("Texto:", redacao.get('texto'), height=500, disabled=True)
 
     with col2:
         st.write("### 📊 Notas e Comentários")
         with st.form("form_correcao"):
-            n1 = st.slider("C1 - Gramática", 0, 200, 0, 40)
-            n2 = st.slider("C2 - Repertório", 0, 200, 0, 40)
-            n3 = st.slider("C3 - Organização", 0, 200, 0, 40)
-            n4 = st.slider("C4 - Coesão", 0, 200, 0, 40)
-            n5 = st.slider("C5 - Proposta", 0, 200, 0, 40)
-            
-            st.divider()
+            n1 = st.slider("C1", 0, 200, 0, 40); n2 = st.slider("C2", 0, 200, 0, 40)
+            n3 = st.slider("C3", 0, 200, 0, 40); n4 = st.slider("C4", 0, 200, 0, 40)
+            n5 = st.slider("C5", 0, 200, 0, 40)
             
             comentarios_caixinhas = []
             if canvas_result and canvas_result.json_data:
                 objetos = canvas_result.json_data["objects"]
-                if objetos:
-                    st.write("#### 💬 Comentários nos destaques:")
-                    for i, obj in enumerate(objetos):
-                        cor_hex = obj['fill']
-                        comentario = st.text_input(f"Destaque {i+1}", key=f"coment_{i}")
-                        comentarios_caixinhas.append({
-                            "id_caixa": i, "comentario": comentario,
-                            "posicao": {
-                                "left": obj['left'], "top": obj['top'],
-                                "width": obj['width'], "height": obj['height'], "color": cor_hex
-                            }
-                        })
+                for i, obj in enumerate(objetos):
+                    comentario = st.text_input(f"Comentário {i+1}", key=f"c_{i}")
+                    comentarios_caixinhas.append({
+                        "id_caixa": i, "comentario": comentario,
+                        "posicao": {"left": obj['left'], "top": obj['top'], "color": obj['fill']}
+                    })
 
-            st.divider()
-            feedback_geral = st.text_area("Feedback Geral Final:", height=150)
+            feedback = st.text_area("Feedback Geral:", height=100)
 
-            if st.form_submit_button("Finalizar e Enviar", type="primary"):
+            if st.form_submit_button("Enviar Correção", type="primary"):
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "notas": [n1, n2, n3, n4, n5],
                     "nota_final": n1+n2+n3+n4+n5,
-                    "feedback_geral": feedback_geral,
+                    "feedback_geral": feedback,
                     "anotacoes_detalhadas": comentarios_caixinhas,
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
-                st.success("✅ Correção enviada!")
-                time.sleep(1)
-                st.rerun()
+                st.success("✅ Sucesso!")
+                time.sleep(1); st.rerun()
