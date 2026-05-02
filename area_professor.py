@@ -1,28 +1,12 @@
 import streamlit as st
 import json
 import time
-import base64
 from io import BytesIO
 from PIL import Image
 from google.cloud import firestore, storage
 from google.oauth2 import service_account
-from urllib.parse import unquote
-
-# --- A "VACINA" PARA O ERRO DO CANVAS ---
-# Ensinamos o Streamlit novo a entender a função que o Canvas antigo precisa
-import streamlit.elements.image as st_image
-if not hasattr(st_image, 'image_to_url'):
-    def _mock_image_to_url(image, *args, **kwargs):
-        buffered = BytesIO()
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        return f"data:image/png;base64,{img_str}"
-    st_image.image_to_url = _mock_image_to_url
-
-# Agora sim, importamos o Canvas com segurança!
 from streamlit_drawable_canvas import st_canvas
+from urllib.parse import unquote
 
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
@@ -32,11 +16,9 @@ st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="
 def iniciar_servicos():
     info_chave = json.loads(st.secrets["firebase_service_account"])
     credenciais = service_account.Credentials.from_service_account_info(info_chave)
-    
     db = firestore.Client(credentials=credenciais, project=info_chave['project_id'])
     storage_client = storage.Client(credentials=credenciais, project=info_chave['project_id'])
     bucket = storage_client.bucket("plataforma-redacao-de0f3.firebasestorage.app")
-    
     return db, bucket
 
 db, bucket = iniciar_servicos()
@@ -82,34 +64,52 @@ else:
                 conteudo_bytes = blob.download_as_bytes()
                 
                 if nome_arquivo_storage.lower().endswith(".pdf"):
-                    st.warning("⚠️ Arquivo PDF detectado.")
+                    st.warning("⚠️ PDF detectado.")
                     st.download_button("📥 Baixar PDF", conteudo_bytes, file_name="redacao.pdf")
                 else:
-                    # PROCESSAMENTO OFICIAL DA IMAGEM
-                    imagem_pil = Image.open(BytesIO(conteudo_bytes))
+                    img_original = Image.open(BytesIO(conteudo_bytes))
                     largura_alvo = 800
-                    largura_orig, altura_orig = imagem_pil.size
-                    altura_alvo = int(largura_alvo * (altura_orig / largura_orig))
+                    w, h = img_original.size
+                    altura_alvo = int(largura_alvo * (h / w))
                     
                     comp_selecionada = st.radio("Competência:", list(COMPETENCIAS.keys()), horizontal=True)
                     cor_pincel = COMPETENCIAS[comp_selecionada]
 
-                    st.info("💡 Desenhe retângulos sobre os erros.")
+                    st.info("💡 Desenhe sobre os erros.")
+
+                    # --- O TRUQUE DE MESTRE (CSS) ---
+                    # Este código impede que a imagem seja arrastada e garante o alinhamento
+                    st.markdown(f"""
+                        <style>
+                        .stImage img {{
+                            user-select: none;
+                            -webkit-user-drag: none;
+                            pointer-events: none;
+                        }}
+                        /* Tenta sobrepor o canvas milimetricamente */
+                        [data-testid="stVerticalBlock"] > div:nth-child(2) {{
+                            margin-top: -{altura_alvo + 45}px;
+                        }}
+                        </style>
+                    """, unsafe_allow_html=True)
+
+                    # 1. Exibe a imagem de fundo (agora protegida pelo CSS)
+                    st.image(img_original, width=largura_alvo)
                     
-                    # Canvas oficial com a imagem travada no fundo
+                    # 2. Canvas Transparente por cima
                     canvas_result = st_canvas(
                         fill_color=cor_pincel,
                         stroke_width=1,
                         stroke_color="#000",
-                        background_image=imagem_pil, # Usando a imagem diretamente!
+                        background_color="rgba(0, 0, 0, 0)", 
                         update_streamlit=True,
                         height=altura_alvo,
                         width=largura_alvo,
                         drawing_mode="rect",
-                        key="canvas_corretor_oficial",
+                        key="canvas_transparente_v2",
                     )
             except Exception as e:
-                st.error(f"Erro ao carregar imagem: {e}")
+                st.error(f"Erro ao carregar: {e}")
         else:
             st.text_area("Texto:", redacao.get('texto'), height=500, disabled=True)
 
@@ -124,7 +124,7 @@ else:
             if canvas_result and canvas_result.json_data:
                 objetos = canvas_result.json_data["objects"]
                 for i, obj in enumerate(objetos):
-                    comentario = st.text_input(f"Comentário do Destaque {i+1}", key=f"c_{i}")
+                    comentario = st.text_input(f"Comentário {i+1}", key=f"c_{i}")
                     comentarios_caixinhas.append({
                         "id_caixa": i, "comentario": comentario,
                         "posicao": {"left": obj['left'], "top": obj['top'], "color": obj['fill']}
