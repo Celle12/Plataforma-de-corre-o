@@ -22,7 +22,7 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 2. Estado da Sessão (Para guardar os cliques e não perder ao recarregar)
+# 2. Estado da Sessão
 if "pontos_correcao" not in st.session_state:
     st.session_state.pontos_correcao = []
 
@@ -54,27 +54,33 @@ else:
 
         if caminho:
             try:
-                # Download e abertura da imagem
+                # --- CALIBRAÇÃO DE PRECISÃO ---
                 blob = bucket.blob(caminho)
                 img_bytes = blob.download_as_bytes()
-                img = Image.open(BytesIO(img_bytes))
+                img_original = Image.open(BytesIO(img_bytes)).convert("RGB")
                 
-                # --- PARTE NOVA: DESENHAR OS PONTOS ---
-                # Criamos uma cópia para desenhar as bolinhas vermelhas
-                img_com_pontos = img.copy()
-                draw = ImageDraw.Draw(img_com_pontos)
+                # Forçamos uma largura fixa para que 1 pixel na tela = 1 pixel na imagem
+                LARGURA_CALIBRADA = 1000 
+                w_orig, h_orig = img_original.size
+                altura_calibrada = int(LARGURA_CALIBRADA * (h_orig / w_orig))
                 
+                # Redimensionamos a imagem FISICAMENTE
+                img_para_exibir = img_original.resize((LARGURA_CALIBRADA, altura_calibrada))
+                draw = ImageDraw.Draw(img_para_exibir)
+                
+                # Desenhar pontos maiores e numerados
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
                     x, y = ponto["x"], ponto["y"]
-                    # Desenha um círculo vermelho com borda branca
-                    draw.ellipse([x-10, y-10, x+10, y+10], fill="red", outline="white", width=2)
-                    draw.text((x+12, y-12), str(i+1), fill="red") # Número do erro
+                    # Raio aumentado para 20 e borda grossa (4) para visibilidade total
+                    raio = 18
+                    draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
+                    # Adiciona o número do erro no centro da bolinha (opcional)
+                    draw.text((x-5, y-8), str(i+1), fill="white")
 
-                # Exibe a imagem e captura o próximo clique
-                # Definimos a largura para 800 para ficar confortável no dashboard
-                value = streamlit_image_coordinates(img_com_pontos, width=800, key="editor_redacao")
+                # Captura coordenadas na imagem já redimensionada (escala 1:1)
+                # IMPORTANTE: Não passamos o parâmetro 'width' aqui para não descalibrar
+                value = streamlit_image_coordinates(img_para_exibir, key="editor_precisao_v2")
 
-                # Se o usuário clicou, salva o ponto e recarrega a página para mostrar a bolinha
                 if value:
                     novo_ponto = {"x": value["x"], "y": value["y"]}
                     if novo_ponto not in st.session_state.pontos_correcao:
@@ -82,13 +88,12 @@ else:
                         st.rerun()
 
             except Exception as e:
-                st.error(f"Erro ao carregar imagem: {e}")
+                st.error(f"Erro de calibração: {e}")
         else:
             st.error("Arquivo não encontrado no Storage.")
 
     with col2:
         st.write("### 📊 Notas e Feedback")
-        # Botão para resetar caso o professor erre o clique
         if st.button("Limpar todas as marcas 🗑️"):
             st.session_state.pontos_correcao = []
             st.rerun()
@@ -103,29 +108,25 @@ else:
             
             st.divider()
             
-            # Comentários por ponto
             comentarios_lista = []
             if st.session_state.pontos_correcao:
                 st.write("#### 💬 Comentários por Erro")
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
-                    txt = st.text_input(f"Erro {i+1}", placeholder="Ex: Cuidado com a vírgula aqui...", key=f"txt_{i}")
+                    txt = st.text_input(f"Erro {i+1} (Posição: {ponto['x']}, {ponto['y']})", key=f"txt_{i}")
                     comentarios_lista.append({"x": ponto['x'], "y": ponto['y'], "texto": txt})
             
-            feedback_geral = st.text_area("Feedback Geral para o Aluno")
+            feedback_geral = st.text_area("Feedback Geral")
             
             if st.form_submit_button("Enviar Correção Final", type="primary"):
-                if not feedback_geral:
-                    st.warning("Por favor, escreva um feedback geral antes de enviar.")
-                else:
-                    db.collection("redacoes").document(redacao['id']).update({
-                        "status": "Corrigida",
-                        "anotacoes_detalhadas": comentarios_lista,
-                        "notas": [n1, n2, n3, n4, n5],
-                        "nota_final": n1+n2+n3+n4+n5,
-                        "feedback_geral": feedback_geral,
-                        "data_correcao": firestore.SERVER_TIMESTAMP
-                    })
-                    st.session_state.pontos_correcao = [] # Limpa para a próxima
-                    st.success("Redação corrigida com sucesso! 🚀")
-                    time.sleep(2)
-                    st.rerun()
+                db.collection("redacoes").document(redacao['id']).update({
+                    "status": "Corrigida",
+                    "anotacoes_detalhadas": comentarios_lista,
+                    "notas": [n1, n2, n3, n4, n5],
+                    "nota_final": n1+n2+n3+n4+n5,
+                    "feedback_geral": feedback_geral,
+                    "data_correcao": firestore.SERVER_TIMESTAMP
+                })
+                st.session_state.pontos_correcao = []
+                st.success("✅ Enviado com sucesso!")
+                time.sleep(1.5)
+                st.rerun()
