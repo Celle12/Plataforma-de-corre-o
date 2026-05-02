@@ -38,11 +38,12 @@ else:
     escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" for r in lista])
     redacao = next(r for r in lista if f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" == escolha)
 
-    col1, col2 = st.columns([2, 1])
+    # --- AJUSTE DE LAYOUT: Coluna da direita mais estreita ---
+    col1, col2 = st.columns([3.5, 1])
 
     with col1:
         st.write("### 📝 Folha de Redação")
-        st.info("💡 Clique na imagem para marcar um erro. Cada clique vira um campo de comentário ao lado.")
+        st.info("💡 Clique na imagem para marcar um erro.")
         
         caminho = redacao.get('caminho_storage')
         url_full = redacao.get('url_arquivo', '')
@@ -54,32 +55,27 @@ else:
 
         if caminho:
             try:
-                # --- CALIBRAÇÃO DE PRECISÃO ---
                 blob = bucket.blob(caminho)
                 img_bytes = blob.download_as_bytes()
                 img_original = Image.open(BytesIO(img_bytes)).convert("RGB")
                 
-                # Forçamos uma largura fixa para que 1 pixel na tela = 1 pixel na imagem
+                # Largura de 1000px mantida conforme sua aprovação
                 LARGURA_CALIBRADA = 1000 
                 w_orig, h_orig = img_original.size
                 altura_calibrada = int(LARGURA_CALIBRADA * (h_orig / w_orig))
                 
-                # Redimensionamos a imagem FISICAMENTE
                 img_para_exibir = img_original.resize((LARGURA_CALIBRADA, altura_calibrada))
                 draw = ImageDraw.Draw(img_para_exibir)
                 
-                # Desenhar pontos maiores e numerados
+                # Desenhar marcas robustas
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
                     x, y = ponto["x"], ponto["y"]
-                    # Raio aumentado para 20 e borda grossa (4) para visibilidade total
                     raio = 18
                     draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=4)
-                    # Adiciona o número do erro no centro da bolinha (opcional)
                     draw.text((x-5, y-8), str(i+1), fill="white")
 
-                # Captura coordenadas na imagem já redimensionada (escala 1:1)
-                # IMPORTANTE: Não passamos o parâmetro 'width' aqui para não descalibrar
-                value = streamlit_image_coordinates(img_para_exibir, key="editor_precisao_v2")
+                # Captura coordenadas em escala 1:1
+                value = streamlit_image_coordinates(img_para_exibir, key="editor_precisao_v3")
 
                 if value:
                     novo_ponto = {"x": value["x"], "y": value["y"]}
@@ -93,31 +89,31 @@ else:
             st.error("Arquivo não encontrado no Storage.")
 
     with col2:
-        st.write("### 📊 Notas e Feedback")
-        if st.button("Limpar todas as marcas 🗑️"):
+        st.write("### 📊 Notas")
+        if st.button("Limpar marcas 🗑️"):
             st.session_state.pontos_correcao = []
             st.rerun()
 
         with st.form("form_final"):
             st.write("#### Competências (0-200)")
-            n1 = st.number_input("C1 - Gramática", 0, 200, 160, 40)
-            n2 = st.number_input("C2 - Repertório", 0, 200, 160, 40)
-            n3 = st.number_input("C3 - Organização", 0, 200, 160, 40)
-            n4 = st.number_input("C4 - Coesão", 0, 200, 160, 40)
-            n5 = st.number_input("C5 - Proposta", 0, 200, 160, 40)
+            n1 = st.number_input("C1", 0, 200, 160, 40)
+            n2 = st.number_input("C2", 0, 200, 160, 40)
+            n3 = st.number_input("C3", 0, 200, 160, 40)
+            n4 = st.number_input("C4", 0, 200, 160, 40)
+            n5 = st.number_input("C5", 0, 200, 160, 40)
             
             st.divider()
             
             comentarios_lista = []
             if st.session_state.pontos_correcao:
-                st.write("#### 💬 Comentários por Erro")
+                st.write("#### 💬 Comentários")
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
-                    txt = st.text_input(f"Erro {i+1} (Posição: {ponto['x']}, {ponto['y']})", key=f"txt_{i}")
+                    txt = st.text_input(f"Erro {i+1}", key=f"txt_{i}")
                     comentarios_lista.append({"x": ponto['x'], "y": ponto['y'], "texto": txt})
             
             feedback_geral = st.text_area("Feedback Geral")
             
-            if st.form_submit_button("Enviar Correção Final", type="primary"):
+            if st.form_submit_button("Enviar Correção", type="primary"):
                 db.collection("redacoes").document(redacao['id']).update({
                     "status": "Corrigida",
                     "anotacoes_detalhadas": comentarios_lista,
@@ -127,6 +123,6 @@ else:
                     "data_correcao": firestore.SERVER_TIMESTAMP
                 })
                 st.session_state.pontos_correcao = []
-                st.success("✅ Enviado com sucesso!")
+                st.success("✅ Enviado!")
                 time.sleep(1.5)
                 st.rerun()
