@@ -11,16 +11,10 @@ from urllib.parse import unquote
 # 1. Configuração e Conexão
 st.set_page_config(page_title="Painel do Corretor", page_icon="⚖️", layout="wide")
 
-# --- CSS PARA EVITAR ATROPELAMENTO ---
 st.markdown("""
     <style>
-    [data-testid="column"] {
-        padding-right: 25px !important;
-    }
-    .img-container {
-        overflow-x: auto;
-        border-right: 1px solid #eee;
-    }
+    [data-testid="column"] { padding-right: 25px !important; }
+    .img-container { overflow-x: auto; border-right: 1px solid #eee; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -35,11 +29,9 @@ def iniciar_servicos():
 
 db, bucket = iniciar_servicos()
 
-# 2. Estado da Sessão
 if "pontos_correcao" not in st.session_state:
     st.session_state.pontos_correcao = []
 
-# --- CRIAÇÃO DAS ABAS (MELHORIA 3) ---
 tab_correcao, tab_temas = st.tabs(["🖋️ Corrigir Redações", "📋 Gerenciar Temas"])
 
 # ==========================================
@@ -48,7 +40,6 @@ tab_correcao, tab_temas = st.tabs(["🖋️ Corrigir Redações", "📋 Gerencia
 with tab_correcao:
     st.title("⚖️ Sistema de Correção por Pontos")
 
-    # 3. Busca de Redações
     redacoes_ref = db.collection("redacoes").where("status", "==", "Pendente").stream()
     lista = [{**r.to_dict(), 'id': r.id} for r in redacoes_ref]
 
@@ -58,7 +49,6 @@ with tab_correcao:
         escolha = st.selectbox("Selecione a redação:", [f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" for r in lista])
         redacao = next(r for r in lista if f"{r.get('aluno_nome', 'Sem Nome')} - {r.get('tema', 'Sem Tema')}" == escolha)
 
-        # --- ÁREA DA REDAÇÃO ---
         st.write("### 📝 Folha de Redação")
         st.info("💡 Clique na imagem para marcar um erro. A caixa de comentário aparecerá logo abaixo.")
         
@@ -85,14 +75,12 @@ with tab_correcao:
                 
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
                     x, y = ponto["x"], ponto["y"]
-                    # MELHORIA 4: RAIO REDUZIDO DE 20 PARA 12
                     raio = 12
                     draw.ellipse([x-raio, y-raio, x+raio, y+raio], fill="red", outline="white", width=3)
-                    draw.text((x-4, y-6), str(i+1), fill="white") # Ajuste do texto para centralizar na bolinha menor
+                    draw.text((x-4, y-6), str(i+1), fill="white")
 
                 value = streamlit_image_coordinates(img_para_exibir, key="editor_v6_vertical")
 
-                # MELHORIA 2: CAIXA APARECE NA HORA (O rerun automático do componente já cuida disso)
                 if value:
                     novo_ponto = {"x": value["x"], "y": value["y"]}
                     if novo_ponto not in st.session_state.pontos_correcao:
@@ -104,7 +92,6 @@ with tab_correcao:
 
         st.divider()
 
-        # --- ÁREA DE AVALIAÇÃO ---
         st.write("### 📊 Painel de Avaliação")
 
         with st.expander("🚫 Negar Correção (Problemas com o arquivo)"):
@@ -134,7 +121,6 @@ with tab_correcao:
 
         with st.form("form_final_vertical"):
             c1, c2, c3, c4, c5 = st.columns(5)
-            # MELHORIA 1: STEP=20 ADICIONADO AOS NUMBER_INPUTS
             with c1: n1 = st.number_input("C1", 0, 200, 160, 20)
             with c2: n2 = st.number_input("C2", 0, 200, 160, 20)
             with c3: n3 = st.number_input("C3", 0, 200, 160, 20)
@@ -145,7 +131,6 @@ with tab_correcao:
             comentarios_lista = []
             if st.session_state.pontos_correcao:
                 for i, ponto in enumerate(st.session_state.pontos_correcao):
-                    # O text_input aparece imediatamente aqui assim que a tela dá o st.rerun() após o clique na imagem
                     txt = st.text_input(f"Comentário para o Erro {i+1}", key=f"txt_v_{i}")
                     comentarios_lista.append({"x": ponto['x'], "y": ponto['y'], "texto": txt})
             else:
@@ -164,20 +149,32 @@ with tab_correcao:
                 st.success("✅ Correção finalizada e enviada!")
                 time.sleep(1.5); st.rerun()
 
-
 # ==========================================
 # ABA 2: GERENCIAMENTO DE TEMAS
 # ==========================================
 with tab_temas:
     st.title("📋 Gerenciador de Temas")
-    st.write("Adicione novos temas de redação para que apareçam automaticamente no aplicativo dos alunos.")
+    st.write("Adicione novos temas e textos de apoio (PDF).")
     
     with st.form("form_novo_tema", clear_on_submit=True):
-        novo_tema = st.text_input("Título do Novo Tema", placeholder="Ex: Caminhos para combater a intolerância religiosa")
+        novo_tema = st.text_input("Título do Novo Tema", placeholder="Ex: Caminhos para combater a intolerância...")
+        
+        # NOVO: Uploader de PDF
+        arquivo_apoio = st.file_uploader("Texto de Apoio (Anexe um PDF) - Opcional", type=["pdf"])
+        
         if st.form_submit_button("Salvar Tema", type="primary"):
             if novo_tema.strip() != "":
+                url_pdf = ""
+                # Se o professor enviou um PDF, fazemos o upload pro Storage
+                if arquivo_apoio:
+                    nome_blob = f"textos_apoio/{int(time.time())}_{arquivo_apoio.name}"
+                    blob = bucket.blob(nome_blob)
+                    blob.upload_from_file(arquivo_apoio, content_type="application/pdf")
+                    url_pdf = blob.public_url # Pega o link gerado
+
                 db.collection("temas").add({
                     "nome": novo_tema.strip(),
+                    "url_apoio": url_pdf, # Salva o link no banco
                     "data_criacao": firestore.SERVER_TIMESTAMP
                 })
                 st.success("✅ Tema adicionado com sucesso!")
@@ -187,13 +184,21 @@ with tab_temas:
                 st.warning("O título do tema não pode estar vazio.")
 
     st.write("---")
-    st.write("#### Temas Cadastrados no Banco de Dados")
-    # Busca os temas já criados para mostrar ao professor
+    st.write("#### Temas Cadastrados")
     temas_salvos = db.collection("temas").order_by("data_criacao", direction=firestore.Query.DESCENDING).stream()
-    lista_temas = [t.to_dict().get('nome') for t in temas_salvos]
     
-    if lista_temas:
-        for t in lista_temas:
-            st.markdown(f"- {t}")
-    else:
-        st.info("Nenhum tema personalizado cadastrado ainda. Use o formulário acima.")
+    temas_encontrados = False
+    for t in temas_salvos:
+        temas_encontrados = True
+        dados = t.to_dict()
+        nome = dados.get('nome')
+        url = dados.get('url_apoio')
+        
+        # Mostra o tema e um clipe se tiver PDF
+        if url:
+            st.markdown(f"- 📎 **{nome}** ([Ver PDF]({url}))")
+        else:
+            st.markdown(f"- {nome}")
+            
+    if not temas_encontrados:
+        st.info("Nenhum tema personalizado cadastrado ainda.")
