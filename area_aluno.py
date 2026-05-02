@@ -49,14 +49,18 @@ if st.session_state.logado == False:
                 try:
                     # Tenta o login
                     user = auth.sign_in_with_email_and_password(email_input, senha_input)
-                    # Se deu certo, salva no estado e força o reinício
+                    
+                    # Se chegou aqui, deu certo!
                     st.session_state.logado = True
                     st.session_state.email_usuario = email_input
                     st.success("Login realizado! Entrando...")
-                    time.sleep(0.5) # Pequena pausa para o usuário ver o sucesso
+                    time.sleep(0.5) 
                     st.rerun()
-                except:
-                    st.error("E-mail ou senha incorretos. Tente novamente.")
+                
+                except Exception as e:
+                    # Investigamos o erro: se NÃO for o sinal de rerun, aí sim é erro de senha
+                    if "RerunException" not in str(type(e)):
+                        st.error("E-mail ou senha incorretos. Tente novamente.")
 
     with aba2:
         with st.form("signup_form"):
